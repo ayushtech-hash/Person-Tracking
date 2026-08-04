@@ -3,7 +3,6 @@ import supervision as sv
 
 from src.schemas import Detection, TrackedDetection
 
-
 class PersonTracker:
     """
     Tracks detected persons using ByteTrack.
