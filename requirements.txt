@@ -4,3 +4,4 @@ supervision
 numpy
 tqdm
 ffmpeg-python
+supervision
