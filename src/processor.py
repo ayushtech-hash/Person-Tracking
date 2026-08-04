@@ -17,6 +17,8 @@ class VideoProcessor:
         self,
         input_video: str,
         output_video: str,
+        selected_track_id: int | None = None,
+
     ):
         """
         Process the input video and save the output video.
@@ -40,10 +42,21 @@ class VideoProcessor:
             if not ret:
                 break
 
+            """detecting multiple persons"""
 
             detections = self.detector.detect(frame)
+            
+            """tracking multiple persons"""
 
             tracked = self.tracker.update(detections)
+            
+            """tracking person by id """
+            
+            if selected_track_id is not None:
+                tracked = [
+                    person
+                    for person in tracked
+                    if person.track_id == selected_track_id]
 
             Visualizer.draw_tracks(frame, tracked)
 
