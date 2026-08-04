@@ -3,20 +3,24 @@ from src import video_loader
 from src import video_loader
 from src import video_loader
 from src import video_loader
-from src import video_writer
-import cv2
-from src.visualizer import Visualizer
+from src import video_loader
+from src import video_loader
+from src import video_loader
 from src.video_loader import VideoLoader
 from src.video_writer import VideoWriter
 from src.detector import PersonDetector
 from src.tracker import PersonTracker
-from src.time_selector import TimeSelector  
+from src.visualizer import Visualizer
+from src.time_selector import TimeSelector
+from src.presence_tracker import PresenceTracker
+
 
 class VideoProcessor:
 
     def __init__(self):
         self.detector = PersonDetector()
         self.tracker = PersonTracker()
+        self.presence_tracker = PresenceTracker()
 
     def process(
         self,
@@ -76,14 +80,8 @@ class VideoProcessor:
             """tracking multiple persons"""
 
             tracked = self.tracker.update(detections)
-            
-            """tracking person by id """
-            
-            if selected_track_id is not None:
-                tracked = [
-                    person
-                    for person in tracked
-                    if person.track_id == selected_track_id]
+            self.presence_tracker.update(tracked,current_frame,)
+                    
 
             Visualizer.draw_tracks(frame, tracked, selected_track_id=selected_track_id)
 
@@ -91,7 +89,23 @@ class VideoProcessor:
             writer.write(frame)
             current_frame+=1
 
+            if current_frame % 100 == 0:
+                print(f"Processed {current_frame}/{time_range.end_frame} frames")
+
         loader.release()
         writer.release()
+
+        if selected_track_id is not None:
+            report = self.presence_tracker.get_presence(
+                selected_track_id,
+                info["fps"],
+            )
+
+            if report is not None:
+                print("\n===== Presence Report =====")
+                print(f"Track ID: {report.track_id}")
+                print(f"Visible Duration: {report.visible_duration:.2f} seconds")
+            else:
+                print("Selected track ID was not found.")
 
    
