@@ -40,7 +40,7 @@ class Visualizer:
 
 
     @staticmethod
-    def draw_detections(frame, detections):
+    def draw_tracks(frame, detections):
         """
         Draw person detections on a frame.
         """
