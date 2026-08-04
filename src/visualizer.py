@@ -40,7 +40,7 @@ class Visualizer:
 
 
     @staticmethod
-    def draw_tracks(frame, tracked_detections):
+    def draw_tracks(frame, tracked_detections,selected_track_id=None):
         """
         TRACK person detections on a frame.
         """
@@ -49,12 +49,24 @@ class Visualizer:
 
             x1, y1, x2, y2 = map(int, det.bbox)
 
+            # Default style
+            color = (150, 150, 150)
+            thickness = 2
+
+            # Highlight selected person
+            if (
+                selected_track_id is not None
+                and det.track_id == selected_track_id
+            ):
+                color = (0, 255, 0)
+                thickness = 3
+
             cv2.rectangle(
                 frame,
                 (x1, y1),
                 (x2, y2),
-                (0, 255, 0),
-                2,
+                color,
+                thickness,
             )
 
             label = f"ID {det.track_id}"
@@ -66,7 +78,7 @@ class Visualizer:
                 (x1, max(20, y1 - 10)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
-                (0, 255, 0),
+                color,
                 2,
             )
 
