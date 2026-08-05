@@ -19,6 +19,8 @@ class PresenceReport:
     first_seen: float
     last_seen: float
     visible_duration: float
+    frames_seen: int
+
 
 
 class PresenceTracker:
@@ -86,6 +88,7 @@ class PresenceTracker:
             first_seen=first_seen,
             last_seen=last_seen,
             visible_duration=duration,
+            frames_seen=info.total_frames_seen,
         )
 
     def get_all_presence(

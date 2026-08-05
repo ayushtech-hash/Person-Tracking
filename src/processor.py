@@ -108,5 +108,12 @@ class VideoProcessor:
                 )
             else:
                 print(f"Track ID {selected_track_id} was not found.")
+        else:
+            reports = self.presence_tracker.get_all_presence(info["fps"],)
+
+            ReportGenerator.print_all_reports(
+                reports,
+                output_video,
+            )
 
    
