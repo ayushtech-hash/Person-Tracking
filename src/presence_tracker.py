@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-
 @dataclass
 class PresenceInfo:
     """
@@ -8,6 +7,7 @@ class PresenceInfo:
     """
     first_frame: int
     last_frame: int
+    total_frames_seen: int = 1
 
 
 @dataclass
@@ -46,11 +46,16 @@ class PresenceTracker:
                 self.presence[track_id] = PresenceInfo(
                     first_frame=current_frame,
                     last_frame=current_frame,
+                    total_frames_seen=1,
                 )
 
             else:
 
-                self.presence[track_id].last_frame = current_frame
+                # self.presence[track_id].last_frame = current_frame
+                info = self.presence[track_id]
+
+                info.last_frame = current_frame
+                info.total_frames_seen += 1
 
     def get_presence(
         self,
@@ -69,11 +74,12 @@ class PresenceTracker:
         first_seen = info.first_frame / fps
         last_seen = info.last_frame / fps
 
-        duration = (
-            info.last_frame
-            - info.first_frame
-            + 1
-        ) / fps
+        # duration = (
+        #     info.last_frame
+        #     - info.first_frame
+        #     + 1
+        # ) / fps
+        duration = info.total_frames_seen / fps
 
         return PresenceReport(
             track_id=track_id,

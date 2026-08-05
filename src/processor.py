@@ -13,7 +13,7 @@ from src.tracker import PersonTracker
 from src.visualizer import Visualizer
 from src.time_selector import TimeSelector
 from src.presence_tracker import PresenceTracker
-
+from src.report_generator import ReportGenerator
 
 class VideoProcessor:
 
@@ -102,10 +102,11 @@ class VideoProcessor:
             )
 
             if report is not None:
-                print("\n===== Presence Report =====")
-                print(f"Track ID: {report.track_id}")
-                print(f"Visible Duration: {report.visible_duration:.2f} seconds")
+                ReportGenerator.print_report(
+                    report,
+                    output_video,
+                )
             else:
-                print("Selected track ID was not found.")
+                print(f"Track ID {selected_track_id} was not found.")
 
    
