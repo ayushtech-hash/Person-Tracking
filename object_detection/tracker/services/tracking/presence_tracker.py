@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from typing import List,Dict,Tuple,Optional
+
 
 @dataclass
 class PresenceInfo:
@@ -27,7 +29,7 @@ class PresenceTracker:
 
     def __init__(self):
         # {track_id: PresenceInfo}
-        self.presence: dict[int, PresenceInfo] = {}
+        self.presence: Dict[int, PresenceInfo] = {}
 
     def update(
         self,
@@ -63,7 +65,7 @@ class PresenceTracker:
         self,
         track_id: int,
         fps: float,
-    ) -> PresenceReport | None:
+    ) -> Optional[PresenceReport]:
         """
         Return presence information for a single person.
         """
@@ -89,12 +91,12 @@ class PresenceTracker:
             last_seen=last_seen,
             visible_duration=duration,
             frames_seen=info.total_frames_seen,
-        )
+        )       
 
     def get_all_presence(
         self,
         fps: float,
-    ) -> list[PresenceReport]:
+    ) -> List[PresenceReport]:
         """
         Return presence information for every tracked person.
         """

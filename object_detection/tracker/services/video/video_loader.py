@@ -19,6 +19,7 @@ class VideoLoader:
             )
 
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        print(self.fps,"====================frames per second====================")
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))

@@ -1,0 +1,2054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Person Tracking System</title>
+
+    <style>
+
+        :root{
+            --bg:#f4f6fb;
+            --card:#ffffff;
+            --border:#e4e8f0;
+            --text:#1a1f2b;
+            --text-muted:#667085;
+            --primary:#4f5eff;
+            --primary-dark:#3c48d6;
+            --success-bg:#e9f9ee;
+            --success-text:#1a7f3c;
+            --error-bg:#fdecea;
+            --error-text:#c0392b;
+            --radius:14px;
+            --shadow:0 1px 3px rgba(16,24,40,0.06), 0 1px 2px rgba(16,24,40,0.04);
+            --shadow-lg:0 8px 24px rgba(16,24,40,0.08);
+        }
+
+        *{
+            box-sizing:border-box;
+        }
+
+        body{
+            font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin:0;
+            padding:0;
+            background:var(--bg);
+            color:var(--text);
+            line-height:1.5;
+        }
+
+        .page{
+            width:100%;
+            margin:0 auto;
+            padding:40px 32px 80px;
+        }
+
+        header.app-header{
+            display:flex;
+            align-items:center;
+            gap:14px;
+            margin-bottom:32px;
+        }
+
+        header.app-header .icon{
+            width:46px;
+            height:46px;
+            border-radius:12px;
+            background:linear-gradient(135deg, var(--primary), #8b5cf6);
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            flex-shrink:0;
+            box-shadow:var(--shadow);
+        }
+
+        header.app-header .icon svg{
+            width:24px;
+            height:24px;
+            stroke:#fff;
+        }
+
+        h1{
+            font-size:24px;
+            font-weight:700;
+            margin:0;
+            letter-spacing:-0.02em;
+        }
+
+        header.app-header p{
+            margin:2px 0 0;
+            font-size:14px;
+            color:var(--text-muted);
+        }
+
+        h2{
+            font-size:16px;
+            font-weight:600;
+            margin:0 0 16px;
+            letter-spacing:-0.01em;
+        }
+
+        h3{
+            font-size:14px;
+            font-weight:600;
+            margin:20px 0 12px;
+        }
+
+        .card{
+            background:var(--card);
+            border:1px solid var(--border);
+            border-radius:var(--radius);
+            box-shadow:var(--shadow);
+            padding:24px;
+            margin-bottom:24px;
+        }
+
+        .card-title-row{
+            display:flex;
+            align-items:center;
+            gap:10px;
+            margin-bottom:18px;
+        }
+
+        .card-title-row .badge-icon{
+            width:28px;
+            height:28px;
+            border-radius:8px;
+            background:#eef0ff;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            flex-shrink:0;
+        }
+
+        .card-title-row .badge-icon svg{
+            width:15px;
+            height:15px;
+            stroke:var(--primary);
+        }
+
+        .card-title-row h2{
+            margin:0;
+        }
+
+        /* Django form.as_p renders <p><label>...<input></p> — style generically */
+        form p{
+            margin:0 0 16px;
+        }
+
+        form label{
+            display:block;
+            font-size:13px;
+            font-weight:600;
+            color:var(--text);
+            margin-bottom:6px;
+        }
+
+        form input[type="file"]{
+            display:block;
+            width:100%;
+            padding:10px 12px;
+            border:1.5px dashed var(--border);
+            border-radius:10px;
+            background:#fafbfd;
+            font-size:13px;
+            color:var(--text-muted);
+            cursor:pointer;
+            transition:border-color 0.15s ease, background 0.15s ease;
+        }
+
+        form input[type="file"]:hover{
+            border-color:var(--primary);
+            background:#f5f6ff;
+        }
+
+        form input[type="text"],
+        form input[type="number"],
+        form select,
+        form textarea{
+            width:100%;
+            padding:10px 12px;
+            border:1px solid var(--border);
+            border-radius:10px;
+            font-size:14px;
+            font-family:inherit;
+            background:#fff;
+            color:var(--text);
+        }
+
+        form input:focus,
+        form select:focus,
+        form textarea:focus{
+            outline:none;
+            border-color:var(--primary);
+            box-shadow:0 0 0 3px rgba(79,94,255,0.12);
+        }
+
+        button{
+            appearance:none;
+            border:none;
+            background:linear-gradient(135deg, var(--primary), #6f5cff);
+            color:#fff;
+            font-size:14px;
+            font-weight:600;
+            padding:11px 22px;
+            border-radius:10px;
+            cursor:pointer;
+            box-shadow:0 2px 6px rgba(79,94,255,0.35);
+            transition:transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+        }
+
+        button:hover:not(:disabled){
+            transform:translateY(-1px);
+            box-shadow:0 4px 10px rgba(79,94,255,0.4);
+        }
+
+        button:active:not(:disabled){
+            transform:translateY(0);
+        }
+
+        button:disabled{
+            opacity:0.55;
+            cursor:not-allowed;
+            box-shadow:none;
+        }
+
+        hr{
+            display:none;
+        }
+
+        table{
+            border-collapse:collapse;
+            width:100%;
+            margin-top:8px;
+            font-size:13.5px;
+            border-radius:10px;
+            overflow:hidden;
+        }
+
+        .table-wrap{
+            overflow-x:auto;
+            border:1px solid var(--border);
+            border-radius:10px;
+        }
+
+        th,td{
+            padding:11px 14px;
+            text-align:left;
+            border-bottom:1px solid var(--border);
+        }
+
+        tr:last-child td{
+            border-bottom:none;
+        }
+
+        th{
+            background:#f7f8fc;
+            font-weight:600;
+            color:var(--text-muted);
+            text-transform:uppercase;
+            font-size:11px;
+            letter-spacing:0.04em;
+        }
+
+        tbody tr:hover{
+            background:#fafbff;
+        }
+
+        video{
+            width:100%;
+            max-width:700px;
+            border-radius:12px;
+            margin-top:4px;
+            margin-bottom:20px;
+            box-shadow:var(--shadow);
+            display:block;
+        }
+
+        img.result-image{
+            margin-top:4px;
+            margin-bottom:20px;
+            max-width:100%;
+            width:100%;
+            max-width:700px;
+            height:auto;
+            border-radius:12px;
+            border:1px solid var(--border);
+            box-shadow:var(--shadow);
+            display:block;
+        }
+
+        .success{
+            color:var(--success-text);
+            font-weight:600;
+            background:var(--success-bg);
+            padding:10px 14px;
+            border-radius:10px;
+            font-size:13.5px;
+            display:inline-block;
+            margin-bottom:16px;
+        }
+
+        .success::before{
+            content:"✓ ";
+        }
+
+        .stat-row{
+            display:flex;
+            flex-wrap:wrap;
+            gap:12px;
+            margin-top:16px;
+        }
+
+        .stat-pill{
+            background:#f7f8fc;
+            border:1px solid var(--border);
+            border-radius:10px;
+            padding:10px 16px;
+            font-size:13px;
+        }
+
+        .stat-pill strong{
+            display:block;
+            font-size:15px;
+            color:var(--text);
+            margin-top:2px;
+        }
+
+        #progress-section{
+            display:none;
+        }
+
+        .progress-container{
+            width:100%;
+            background:#eceffb;
+            border-radius:999px;
+            overflow:hidden;
+            height:12px;
+            margin-top:14px;
+        }
+
+        .progress-bar{
+            height:100%;
+            background:linear-gradient(90deg, var(--primary), #8b5cf6);
+            width:0%;
+            border-radius:999px;
+            transition:width 0.3s ease;
+        }
+
+        .progress-details{
+            margin-top:12px;
+            margin-bottom:0;
+            color:var(--text-muted);
+            font-size:13px;
+            display:flex;
+            justify-content:space-between;
+        }
+
+        .progress-status{
+            font-weight:600;
+            color:var(--text);
+            font-size:14px;
+            margin:0;
+        }
+        .processing-time {
+            margin-top: 12px;
+            margin-bottom: 0;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .processing-time strong {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .error{
+            color:var(--error-text);
+            font-weight:500;
+            background:var(--error-bg);
+            padding:10px 14px;
+            border-radius:10px;
+            font-size:13.5px;
+        }
+
+        .section-divider{
+            margin:32px 0;
+            border:none;
+            border-top:1px solid var(--border);
+        }
+
+        .mode-toggle{
+            display:flex;
+            gap:4px;
+            background:#eceffb;
+            padding:4px;
+            border-radius:12px;
+            margin-bottom:24px;
+            max-width:420px;
+        }
+
+        .mode-toggle button{
+            flex:1;
+            background:transparent;
+            color:var(--text-muted);
+            box-shadow:none;
+            padding:10px 16px;
+            border-radius:9px;
+            font-size:13.5px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            gap:8px;
+        }
+
+        .mode-toggle button svg{
+            width:15px;
+            height:15px;
+            stroke:currentColor;
+            flex-shrink:0;
+        }
+
+        .mode-toggle button:hover:not(.active):not(:disabled){
+            transform:none;
+            box-shadow:none;
+            color:var(--text);
+            background:rgba(255,255,255,0.6);
+        }
+
+        .mode-toggle button.active{
+            background:#fff;
+            color:var(--primary);
+            box-shadow:0 1px 3px rgba(16,24,40,0.12);
+            font-weight:600;
+        }
+
+        .mode-panel{
+            display:none;
+        }
+
+        .mode-panel.active{
+            display:block;
+        }
+
+        .split-layout{
+            display:grid;
+            grid-template-columns:380px 1fr;
+            gap:24px;
+            align-items:start;
+        }
+
+        .split-layout.split-layout-3col{
+            grid-template-columns:360px 1fr 380px;
+        }
+
+        .split-left,
+        .split-right,
+        .split-third{
+            min-width:0;
+        }
+
+        .split-left{
+            position:sticky;
+            top:24px;
+        }
+
+        @media (max-width:1100px){
+            .split-layout.split-layout-3col{
+                grid-template-columns:340px 1fr;
+            }
+            .split-third{
+                grid-column:1 / -1;
+            }
+        }
+
+        @media (max-width:860px){
+            .split-left{
+                position:static;
+            }
+        }
+
+        .result-card{
+            min-height:200px;
+        }
+
+        .empty-state{
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            text-align:center;
+            padding:48px 24px;
+            border:1.5px dashed var(--border);
+            border-radius:12px;
+            color:var(--text-muted);
+            background:#fafbfd;
+        }
+
+        .empty-state .empty-icon{
+            width:44px;
+            height:44px;
+            border-radius:12px;
+            background:#eef0ff;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            margin-bottom:14px;
+        }
+
+        .empty-state .empty-icon svg{
+            width:22px;
+            height:22px;
+            stroke:var(--primary);
+        }
+
+        .empty-state p{
+            margin:0;
+            font-size:13.5px;
+        }
+
+        .time-row{
+            display:flex;
+            gap:12px;
+        }
+
+        .time-row p.time-field{
+            flex:1;
+            min-width:0;
+            margin-bottom:16px;
+        }
+
+        .field-hidden{
+            display:none !important;
+        }
+
+
+        /* Live new-track debugging — responsive grid: 3 cols by default, growing on wider screens */
+        #new-track-events {
+            display:grid;
+            grid-template-columns:repeat(3, 1fr);
+            gap:10px;
+            margin-top:16px;
+        }
+
+        .new-track-event {
+            border:1px solid var(--border);
+            border-radius:12px;
+            padding:10px;
+            background:#fafbfd;
+            transition:border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+        }
+
+        .new-track-event:hover {
+            border-color:#c8cdf5;
+            box-shadow:var(--shadow-lg);
+            transform:translateY(-2px);
+        }
+
+        .new-track-event-header {
+            display:flex;
+            justify-content:space-between;
+            align-items:flex-start;
+            gap:8px;
+            margin-bottom:8px;
+        }
+
+        .new-track-event-title {
+            font-size:12.5px;
+            font-weight:700;
+        }
+
+        .new-track-event-meta {
+            font-size:11px;
+            color:var(--text-muted);
+            margin-top:2px;
+        }
+
+        .new-track-event .thumb-wrap {
+            position:relative;
+            border-radius:9px;
+            overflow:hidden;
+            border:1px solid var(--border);
+            aspect-ratio:1 / 1;
+            background:#eceffb;
+            cursor:zoom-in;
+        }
+
+        .new-track-event img {
+            width:100%;
+            height:100%;
+            display:block;
+            object-fit:cover;
+            transition:transform 0.2s ease;
+        }
+
+        .new-track-event .thumb-wrap:hover img {
+            transform:scale(1.06);
+        }
+
+        .new-track-event .thumb-wrap::after {
+            content:"";
+            position:absolute;
+            inset:0;
+            background:rgba(20,24,40,0);
+            transition:background 0.15s ease;
+            pointer-events:none;
+        }
+
+        .new-track-event .thumb-wrap:hover::after {
+            background:rgba(20,24,40,0.08);
+        }
+
+        .new-track-badge {
+            display:inline-block;
+            padding:4px 8px;
+            border-radius:7px;
+            background:#eef0ff;
+            color:var(--primary);
+            font-size:11px;
+            font-weight:700;
+            white-space:nowrap;
+            flex-shrink:0;
+        }
+
+        @media (min-width:1600px){
+            #new-track-events {
+                grid-template-columns:repeat(4, 1fr);
+            }
+        }
+
+        @media (min-width:1960px){
+            #new-track-events {
+                grid-template-columns:repeat(5, 1fr);
+            }
+        }
+
+        @media (max-width:640px){
+            #new-track-events {
+                grid-template-columns:repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width:420px){
+            #new-track-events {
+                grid-template-columns:repeat(1, 1fr);
+            }
+        }
+
+        /* Zoom-view lightbox for any clickable snapshot / result image */
+        img.zoomable,
+        .new-track-event img {
+            cursor:zoom-in;
+        }
+
+        #lightbox-overlay {
+            display:none;
+            position:fixed;
+            inset:0;
+            background:rgba(15,17,26,0.82);
+            z-index:1000;
+            align-items:center;
+            justify-content:center;
+            padding:40px 24px;
+        }
+
+        #lightbox-overlay.open {
+            display:flex;
+        }
+
+        #lightbox-overlay img {
+            max-width:min(92vw, 1100px);
+            max-height:88vh;
+            width:auto;
+            height:auto;
+            border-radius:12px;
+            box-shadow:0 20px 60px rgba(0,0,0,0.5);
+            display:block;
+        }
+
+        #lightbox-caption {
+            position:absolute;
+            bottom:28px;
+            left:0;
+            right:0;
+            text-align:center;
+            color:#fff;
+            font-size:13px;
+            opacity:0.85;
+        }
+
+        #lightbox-content {
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            max-width:94vw;
+            max-height:92vh;
+        }
+
+        #lightbox-image {
+            transition:opacity 0.15s ease;
+        }
+
+        #lightbox-actions {
+            display:flex;
+            gap:10px;
+            margin-top:16px;
+        }
+
+        #lightbox-actions button {
+            background:rgba(255,255,255,0.95);
+            color:var(--text);
+            border:none;
+            padding:9px 16px;
+            border-radius:9px;
+            font-size:13px;
+            font-weight:600;
+            cursor:pointer;
+            box-shadow:0 2px 8px rgba(0,0,0,0.18);
+        }
+
+        #lightbox-actions button:hover {
+            background:#fff;
+            transform:translateY(-1px);
+        }
+
+        #lightbox-actions #lightbox-back-person {
+            background:rgba(255,255,255,0.82);
+        }
+
+        #lightbox-close {
+            position:absolute;
+            top:20px;
+            right:24px;
+            width:40px;
+            height:40px;
+            border-radius:50%;
+            background:rgba(255,255,255,0.12);
+            color:#fff;
+            border:none;
+            font-size:20px;
+            line-height:1;
+            cursor:pointer;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            box-shadow:none;
+        }
+
+        #lightbox-close:hover {
+            background:rgba(255,255,255,0.22);
+            transform:none;
+            box-shadow:none;
+        }
+
+        @media (max-width:860px){
+            .split-layout{
+                grid-template-columns:1fr;
+            }
+            .split-layout.split-layout-3col{
+                grid-template-columns:1fr;
+            }
+        }
+
+        @media (max-width:480px){
+            .time-row{
+                flex-direction:column;
+                gap:0;
+            }
+        }
+
+        @media (max-width:600px){
+            .page{
+                padding:24px 16px 60px;
+            }
+            .card{
+                padding:18px;
+            }
+        }
+
+    </style>
+
+</head>
+<body data-has-video-result="{% if output_video %}true{% else %}false{% endif %}">
+
+<div class="page">
+
+<header class="app-header">
+    <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>
+    </div>
+    <div>
+        <h1>Person Tracking System</h1>
+        <p>Detect and track people in images and video</p>
+    </div>
+</header>
+
+<div class="mode-toggle" role="tablist">
+    <button type="button" id="toggle-video-btn" class="active" role="tab" aria-selected="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2"></rect>
+        </svg>
+        Video
+    </button>
+    <button type="button" id="toggle-image-btn" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <path d="M21 15l-5-5L5 21"></path>
+        </svg>
+        Image
+    </button>
+</div>
+
+<div id="image-panel" class="mode-panel">
+
+<div class="split-layout split-layout-3col">
+
+<div class="split-left">
+<div class="card">
+<div class="card-title-row">
+    <div class="badge-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <path d="M21 15l-5-5L5 21"></path>
+        </svg>
+    </div>
+    <h2>Detect Persons in Image</h2>
+</div>
+
+<p id="image-form-error" class="error" style="display:none;"></p>
+
+<form method="POST" enctype="multipart/form-data" id="image-upload-form" action="{% url 'detect_image' %}">
+
+    {% csrf_token %}
+
+    {{ image_form.as_p }}
+
+    <button type="submit" id="image-submit-btn">
+        Detect Persons
+    </button>
+
+</form>
+</div>
+</div>
+
+<div class="split-right">
+    <div class="card result-card">
+        <h2>Detected Image</h2>
+
+        <div id="image-result-image">
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none"
+                         stroke-width="2"
+                         stroke-linecap="round"
+                         stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <path d="M21 15l-5-5L5 21"></path>
+                    </svg>
+                </div>
+                <p>Upload an image to see the detected image here.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<div class="split-third">
+    <div class="card result-card">
+        <h2>Detection Result</h2>
+
+        <div id="image-results-section">
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none"
+                         stroke-width="2"
+                         stroke-linecap="round"
+                         stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <path d="M21 15l-5-5L5 21"></path>
+                    </svg>
+                </div>
+                <p>Upload an image to see detection results here.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+</div>
+</div>
+
+<div id="video-panel" class="mode-panel active">
+<div class="split-layout split-layout-3col">
+
+<div class="split-left">
+<div class="card">
+<div class="card-title-row">
+    <div class="badge-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2"></rect>
+        </svg>
+    </div>
+    <h2>Upload Video for Tracking</h2>
+</div>
+
+<p id="form-error" class="error" style="display:none;"></p>
+
+<form method="POST" enctype="multipart/form-data" id="upload-form">
+
+    {% csrf_token %}
+
+    {{ form.as_p }}
+
+    <button type="submit" id="submit-btn">
+        Process Video
+    </button>
+
+</form>
+</div>
+
+<div id="progress-section" class="card">
+    <h2>Processing Video</h2>
+    <p class="progress-status" id="progress-status">Starting...</p>
+    <div class="progress-container">
+        <div class="progress-bar" id="progress-bar"></div>
+    </div>
+    <p class="progress-details">
+        <span id="progress-percent">0%</span>
+        <span id="progress-frames">0 / 0 frames processed</span>
+    </p>
+</div>
+
+<p id="processing-time" class="processing-time" style="display:none;">
+    Processing time:
+    <strong id="processing-time-value"></strong>
+</p>
+
+<div id="video-result-section" class="card"{% if not output_video %} style="display:none;"{% endif %}>
+    <h2>Tracked Video</h2>
+    <div id="video-result-content">
+    {% if output_video %}
+    <video width="700" controls>
+        <source src="{{ output_video }}" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    {% endif %}
+    </div>
+</div>
+</div>
+
+<div class="split-third">
+<div id="new-track-section" class="card result-card">
+    <div class="card-title-row">
+        <div class="badge-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <path d="M21 15l-5-5L5 21"></path>
+            </svg>
+        </div>
+        <h2>New Track IDs Detected</h2>
+    </div>
+    <p style="color:var(--text-muted); font-size:13px; margin:0;">
+        A snapshot appears here whenever the tracker assigns a new ID.
+    </p>
+    <div id="new-track-empty" class="empty-state" style="margin-top:16px;">
+        <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <path d="M21 15l-5-5L5 21"></path>
+            </svg>
+        </div>
+        <p>New track snapshots will appear here once processing starts.</p>
+    </div>
+    <div id="new-track-events"></div>
+</div>
+</div>
+
+<div class="split-right">
+<div class="card result-card">
+<h2>Tracking Result</h2>
+<div id="results-section">
+
+{% if success %}
+<p class="success">Video uploaded and processed successfully!</p>
+{% endif %}
+
+
+{% if output_video %}
+
+{% if report %}
+
+{% if report.reports %}
+
+<div class="stat-row">
+    <div class="stat-pill">Peak Persons Detected<strong>{{ report.peak_persons_detected }}</strong></div>
+    <div class="stat-pill">Total Visible Time<strong>{{ report.total_visible_time }} sec</strong></div>
+</div>
+
+{% else %}
+
+<div class="stat-row">
+    <div class="stat-pill">Peak Persons Detected<strong>{{ report.peak_persons_detected }}</strong></div>
+</div>
+
+{% endif %}
+
+<h3>Tracking Report</h3>
+
+{% if report.reports %}
+
+<div class="table-wrap">
+<table>
+
+    <tr>
+        <th>Track ID</th>
+        <th>First Seen (sec)</th>
+        <th>Last Seen (sec)</th>
+        <th>Visible Duration (sec)</th>
+        <th>Frames Seen</th>
+    </tr>
+
+    {% for item in report.reports %}
+
+    <tr>
+        <td>{{ item.track_id }}</td>
+        <td>{{ item.first_seen }}</td>
+        <td>{{ item.last_seen }}</td>
+        <td>{{ item.visible_duration }}</td>
+        <td>{{ item.frames_seen }}</td>
+    </tr>
+
+    {% endfor %}
+
+</table>
+</div>
+
+{% else %}
+
+<div class="table-wrap">
+<table>
+
+    <tr>
+        <th>Track ID</th>
+        <td>{{ report.track_id }}</td>
+    </tr>
+
+    <tr>
+        <th>First Seen</th>
+        <td>{{ report.first_seen }} sec</td>
+    </tr>
+
+    <tr>
+        <th>Last Seen</th>
+        <td>{{ report.last_seen }} sec</td>
+    </tr>
+
+    <tr>
+        <th>Visible Duration</th>
+        <td>{{ report.visible_duration }} sec</td>
+    </tr>
+
+    <tr>
+        <th>Frames Seen</th>
+        <td>{{ report.frames_seen }}</td>
+    </tr>
+
+</table>
+</div>
+
+{% endif %}
+
+{% endif %}
+
+{% else %}
+
+<div class="empty-state">
+    <div class="empty-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2"></rect>
+        </svg>
+    </div>
+    <p>Upload a video to see tracking results here.</p>
+</div>
+
+{% endif %}
+
+</div>
+</div>
+</div>
+
+</div>
+</div>
+</div>
+
+<div id="lightbox-overlay">
+    <button
+        type="button"
+        id="lightbox-close"
+        aria-label="Close"
+    >
+        &times;
+    </button>
+    <div id="lightbox-content">
+        <img
+            id="lightbox-image"
+            src=""
+            alt=""
+        >
+        <div id="lightbox-caption"></div>
+        <div id="lightbox-actions">
+            <button
+                type="button"
+                id="lightbox-view-full"
+            >
+                View Full Frame
+            </button>
+            <button
+                type="button"
+                id="lightbox-back-person"
+                style="display:none;"
+            >
+                Back to Person
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    var hasInitialVideoResult = document.body.dataset.hasVideoResult === "true";
+
+
+(function () { 
+    const overlay = document.getElementById("lightbox-overlay");
+    const overlayImg = document.getElementById("lightbox-image");
+    const overlayCaption = document.getElementById("lightbox-caption");
+    const closeBtn = document.getElementById("lightbox-close");
+
+    const viewFullBtn = document.getElementById(
+        "lightbox-view-full"
+    );
+
+    const backPersonBtn = document.getElementById(
+        "lightbox-back-person"
+    );
+
+    if (
+        !overlay ||
+        !overlayImg ||
+        !closeBtn
+    ) {
+        return;
+    }
+
+    let currentPersonImage = "";
+    let currentFullFrameImage = "";
+    let showingFullFrame = false;
+
+    function openLightbox(
+    thumbnailSrc,
+    alt,
+    caption,
+    personCropSrc,
+    fullFrameSrc
+) {
+    currentPersonImage =
+        personCropSrc || thumbnailSrc;
+
+    currentFullFrameImage =
+        fullFrameSrc || "";
+
+    showingFullFrame = false;
+
+    // IMPORTANT:
+    // Open the FULL bounding-box crop,
+    // NOT the thumbnail.
+    overlayImg.src =
+        currentPersonImage;
+
+    overlayImg.alt =
+        alt || "";
+
+    overlayCaption.textContent =
+        caption || "";
+
+    if (viewFullBtn) {
+        viewFullBtn.style.display =
+            currentFullFrameImage
+                ? "inline-flex"
+                : "none";
+    }
+
+    if (backPersonBtn) {
+        backPersonBtn.style.display =
+            "none";
+    }
+
+    overlay.classList.add("open");
+
+    document.body.style.overflow =
+        "hidden";
+}
+
+
+    
+    function showFullFrame() {
+
+        if (!currentFullFrameImage) {
+            return;
+        }
+
+        showingFullFrame = true;
+
+        overlayImg.src =
+            currentFullFrameImage;
+
+        if (viewFullBtn) {
+            viewFullBtn.style.display =
+                "none";
+        }
+        if (backPersonBtn) {
+            backPersonBtn.style.display =
+                "inline-flex";
+        }
+        overlayCaption.textContent =
+            overlayCaption.textContent.replace(
+                " — Person Crop",
+                ""
+            ) + " — Full Frame";
+    }
+
+    function showPersonCrop() {
+        if (!currentPersonImage) {
+            return;
+        }
+        showingFullFrame = false;
+
+        overlayImg.src =
+            currentPersonImage;
+
+        if (viewFullBtn) {
+            viewFullBtn.style.display =
+                currentFullFrameImage
+                    ? "inline-flex"
+                    : "none";
+        }
+        if (backPersonBtn) {
+            backPersonBtn.style.display =
+                "none";
+        }
+        overlayCaption.textContent =
+            overlayCaption.textContent.replace(
+                " — Full Frame",
+                ""
+            );
+    }
+
+    function closeLightbox() {
+
+        overlay.classList.remove("open");
+        overlayImg.src = "";
+        currentPersonImage = "";
+        currentFullFrameImage = "";
+        showingFullFrame = false;
+
+        document.body.style.overflow = "";
+    }
+    // ---------------------------------------------------------
+    // Click on thumbnail
+    // ---------------------------------------------------------
+
+    document.addEventListener(
+        "click",
+        function (event) {
+
+            const wrap =
+                event.target.closest(
+                    ".thumb-wrap"
+                );
+
+            const directImg =
+                event.target.closest(
+                    ".zoomable"
+                );
+
+            const trackCard =
+                event.target.closest(
+                    ".new-track-event"
+                );
+
+            // New track event
+            if (wrap && trackCard) {
+
+                const image =
+                    wrap.querySelector("img");
+
+                if (!image) {
+                    return;
+                }
+
+                const personCropSrc =
+                    image.dataset.personCrop || "";
+
+                const fullFrameSrc =
+                    image.dataset.fullFrame || "";
+
+                const title =
+                    trackCard.querySelector(
+                        ".new-track-event-title"
+                    );
+
+                const meta =
+                    trackCard.querySelector(
+                        ".new-track-event-meta"
+                    );
+
+                let caption = "";
+
+                if (title) {
+                    caption +=
+                        title.textContent;
+                }
+
+                if (meta) {
+                    caption +=
+                        " — " +
+                        meta.textContent;
+                }
+
+                caption +=
+                    " — Person Crop";
+
+                openLightbox(
+                    image.src,
+                    image.alt,
+                    caption,
+                    personCropSrc,
+                    fullFrameSrc
+                );
+                
+
+                return;
+            }
+
+            // Existing generic zoomable images
+            if (directImg) {
+
+                
+                openLightbox(
+                    image.src,
+                    image.alt,
+                    caption,
+                    personCropSrc,
+                    fullFrameSrc
+                );
+                
+
+                return;
+            }
+
+            // Existing generic zoomable images
+            if (directImg) {
+
+                openLightbox(
+                    directImg.src,
+                    directImg.alt,
+                    directImg.alt || "",
+                    ""
+                )
+            }
+        }
+    );
+
+    // ---------------------------------------------------------
+    // View Full Frame
+    // ---------------------------------------------------------
+
+    if (viewFullBtn) {
+        viewFullBtn.addEventListener(
+            "click",
+            function () {
+
+                showFullFrame();
+
+            }
+        );
+    }
+    // ---------------------------------------------------------
+    // Back to Person
+    // ---------------------------------------------------------
+
+    if (backPersonBtn) {
+        backPersonBtn.addEventListener(
+            "click",
+            function () {
+
+                showPersonCrop();
+
+            }
+        );
+    }
+    closeBtn.addEventListener(
+        "click",
+        closeLightbox
+    );
+    overlay.addEventListener(
+        "click",
+        function (event) {
+            if (event.target === overlay) {
+                closeLightbox();
+            }
+        }
+    );
+    document.addEventListener(
+        "keydown",
+        function (event) {
+            if (event.key === "Escape") {
+                closeLightbox();
+            }
+        }
+    );
+    window.openLightbox =
+        openLightbox;
+})();
+
+
+
+(function () {
+    const imageBtn = document.getElementById("toggle-image-btn");
+    const videoBtn = document.getElementById("toggle-video-btn");
+    const imagePanel = document.getElementById("image-panel");
+    const videoPanel = document.getElementById("video-panel");
+
+    function showPanel(mode) {
+        const isImage = mode === "image";
+        imagePanel.classList.toggle("active", isImage);
+        videoPanel.classList.toggle("active", !isImage);
+        imageBtn.classList.toggle("active", isImage);
+        videoBtn.classList.toggle("active", !isImage);
+        imageBtn.setAttribute("aria-selected", isImage ? "true" : "false");
+        videoBtn.setAttribute("aria-selected", isImage ? "false" : "true");
+    }
+
+    imageBtn.addEventListener("click", function () {
+        showPanel("image");
+    });
+
+    videoBtn.addEventListener("click", function () {
+        showPanel("video");
+    });
+})();
+
+(function () {
+    const form = document.getElementById("upload-form");
+    if (!form) return;
+
+    const paragraphs = Array.from(form.querySelectorAll("p"));
+    let startField = null;
+    let endField = null;
+    let trackIdField = null;
+
+    paragraphs.forEach(function (p) {
+        const label = p.querySelector("label");
+        if (!label) return;
+        const text = label.textContent.toLowerCase();
+        if (!startField && text.indexOf("start") !== -1) {
+            startField = p;
+        } else if (!endField && text.indexOf("end") !== -1) {
+            endField = p;
+        } else if (!trackIdField && text.indexOf("track") !== -1) {
+            trackIdField = p;
+        }
+    });
+
+    if (startField && endField) {
+        const row = document.createElement("div");
+        row.className = "time-row";
+        startField.classList.add("time-field");
+        endField.classList.add("time-field");
+        startField.parentNode.insertBefore(row, startField);
+        row.appendChild(startField);
+        row.appendChild(endField);
+
+        const startInput = startField.querySelector("input");
+        const endInput = endField.querySelector("input");
+        if (startInput && !startInput.placeholder) {
+            startInput.placeholder = "00:00:20";
+        }
+        if (endInput && !endInput.placeholder) {
+            endInput.placeholder = "00:00:45";
+        }
+    }
+
+    if (trackIdField) {
+        trackIdField.id = "track-id-field";
+        if (!hasInitialVideoResult) {
+            trackIdField.classList.add("field-hidden");
+        }
+    }
+})();
+
+
+(function () {
+    const form = document.getElementById("upload-form");
+    const submitBtn = document.getElementById("submit-btn");
+    const progressSection = document.getElementById("progress-section");
+    const progressBar = document.getElementById("progress-bar");
+    const progressStatus = document.getElementById("progress-status");
+    const progressPercent = document.getElementById("progress-percent");
+    const progressFrames = document.getElementById("progress-frames");
+    const processingTime =document.getElementById("processing-time");
+    const processingTimeValue =document.getElementById("processing-time-value");
+    const resultsSection = document.getElementById("results-section");
+    const formError = document.getElementById("form-error");
+
+    let pollInterval = null;
+    let lastProgress = { current_frame: 0, total_frames: 0 };
+    let displayedTrackIds = new Set();
+
+    function formatStatus(status) {
+        const labels = {
+            Processing: "Processing frames...",
+            Converting: "Converting video for browser playback...",
+            Completed: "Completed",
+            Failed: "Failed",
+        };
+        return labels[status] || status || "Processing frames...";
+    }
+
+    function updateProgressUI(currentFrame, totalFrames, percent, status) {
+        lastProgress.current_frame = currentFrame;
+        lastProgress.total_frames = totalFrames;
+        progressBar.style.width = percent + "%";
+        progressPercent.textContent = percent + "%";
+        progressFrames.textContent = currentFrame + " / " + totalFrames + " frames processed";
+        progressStatus.textContent = formatStatus(status);
+    }
+
+    function stopPolling() {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+    }
+
+    async function fetchProgress() {
+        const response = await fetch("{% url 'get_progress' %}");
+        const contentType = response.headers.get("content-type") || "";
+
+        if (!contentType.includes("application/json")) {
+            throw new Error("Server returned an unexpected response.");
+        }
+
+        return response.json();
+    }
+    function formatProcessingTime(seconds) {
+        seconds = Math.round(seconds);
+
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+
+        if (minutes > 0) {
+            return (
+                minutes +
+                " min " +
+                remainingSeconds +
+                " sec"
+            );
+        }
+
+        return remainingSeconds + " sec";
+    }
+
+
+    function renderNewTrackEvents(events) {
+        const container = document.getElementById("new-track-events");
+        const emptyState = document.getElementById("new-track-empty");
+
+        if (!container || !Array.isArray(events) || events.length === 0) {
+            return;
+        }
+
+        if (emptyState) {
+            emptyState.style.display = "none";
+        }
+
+        events.forEach(function (event) {
+            if (event == null || event.track_id == null || displayedTrackIds.has(String(event.track_id))) {
+                return;
+            }
+
+            displayedTrackIds.add(String(event.track_id));
+
+            const card = document.createElement("div");
+            card.className = "new-track-event";
+
+            const header = document.createElement("div");
+            header.className = "new-track-event-header";
+
+            const info = document.createElement("div");
+
+            const title = document.createElement("div");
+            title.className = "new-track-event-title";
+            title.textContent = "New Track ID " + event.track_id;
+
+            const meta = document.createElement("div");
+            meta.className = "new-track-event-meta";
+            const timeLabel = (event.time_sec === undefined || event.time_sec === null)
+                ? "" : " • " + event.time_sec + " sec";
+            meta.textContent = "Frame " + event.frame + timeLabel;
+
+            const badge = document.createElement("span");
+            badge.className = "new-track-badge";
+            badge.textContent = "NEW ID";
+
+            info.appendChild(title);
+            info.appendChild(meta);
+            header.appendChild(info);
+            header.appendChild(badge);
+            card.appendChild(header);
+
+            if (event.image_url) {
+
+                const thumbWrap =
+                    document.createElement("div");
+
+                thumbWrap.className =
+                    "thumb-wrap";
+
+                const image =
+                    document.createElement("img");
+
+                const cacheBuster =
+                    "t=" + Date.now();
+
+                // Small face/neck thumbnail
+                image.src =
+                    event.image_url +
+                    (
+                        event.image_url.indexOf("?") === -1
+                            ? "?"
+                            : "&"
+                    ) +
+                    cacheBuster;
+
+                // FULL bounding-box crop
+                if (event.person_crop_url) {
+                    image.dataset.personCrop =
+                        event.person_crop_url +
+                        (
+                            event.person_crop_url.indexOf("?") === -1
+                                ? "?"
+                                : "&"
+                        ) +
+                        cacheBuster;
+                }
+                image.alt =
+                    "Tracked person - ID " +
+                    event.track_id +
+                    " at frame " +
+                    event.frame;
+                image.loading = "lazy";
+                
+
+
+                if (event.full_frame_url) {
+                    image.dataset.fullFrame =
+                        event.full_frame_url +
+                        (
+                            event.full_frame_url.indexOf("?") === -1
+                                ? "?"
+                                : "&"
+                        ) +
+                        cacheBuster;
+                }
+
+                thumbWrap.appendChild(image);
+                card.appendChild(thumbWrap);
+            }
+
+            container.appendChild(card);
+        });
+    }
+
+    function startPolling(onComplete, onFailed) {
+        stopPolling();
+        pollInterval = setInterval(async function () {
+            try {
+                const data = await fetchProgress();
+                updateProgressUI(
+                    data.current_frame,
+                    data.total_frames,
+                    data.progress,
+                    data.status
+                );
+
+                // Live new-track snapshots from the backend.
+                renderNewTrackEvents(data.new_track_events || []);
+
+                if (data.status === "Completed") {
+                    stopPolling();
+                    onComplete(data);
+                } else if (data.status === "Failed") {
+                    stopPolling();
+                    onFailed(data);
+                }
+            } catch (err) {
+                console.error("Failed to fetch progress:", err);
+            }
+        }, 500);
+    }
+
+    function renderResults(data) {
+        let html = '<p class="success">Video uploaded and processed successfully!</p>';
+
+        if (data.output_video) {
+            if (data.report) {
+                if (data.report.reports) {
+                    html += '<div class="stat-row">';
+                    html += '<div class="stat-pill">Peak Persons Detected<strong>' + data.report.peak_persons_detected + '</strong></div>';
+                    html += '<div class="stat-pill">Total Visible Time<strong>' + data.report.total_visible_time + ' sec</strong></div>';
+                    html += '</div>';
+                } else {
+                    html += '<div class="stat-row">';
+                    html += '<div class="stat-pill">Peak Persons Detected<strong>' + data.report.peak_persons_detected + '</strong></div>';
+                    html += '</div>';
+                }
+
+                html += '<h3>Tracking Report</h3>';
+
+                if (data.report.reports) {
+                    html += '<div class="table-wrap"><table>';
+                    html += '<tr><th>Track ID</th><th>First Seen (sec)</th><th>Last Seen (sec)</th>';
+                    html += '<th>Visible Duration (sec)</th><th>Frames Seen</th></tr>';
+
+                    data.report.reports.forEach(function (item) {
+                        html += '<tr>';
+                        html += '<td>' + item.track_id + '</td>';
+                        html += '<td>' + item.first_seen + '</td>';
+                        html += '<td>' + item.last_seen + '</td>';
+                        html += '<td>' + item.visible_duration + '</td>';
+                        html += '<td>' + item.frames_seen + '</td>';
+                        html += '</tr>';
+                    });
+
+                    html += '</table></div>';
+                } else {
+                    html += '<div class="table-wrap"><table>';
+                    html += '<tr><th>Track ID</th><td>' + data.report.track_id + '</td></tr>';
+                    html += '<tr><th>First Seen</th><td>' + data.report.first_seen + ' sec</td></tr>';
+                    html += '<tr><th>Last Seen</th><td>' + data.report.last_seen + ' sec</td></tr>';
+                    html += '<tr><th>Visible Duration</th><td>' + data.report.visible_duration + ' sec</td></tr>';
+                    html += '<tr><th>Frames Seen</th><td>' + data.report.frames_seen + '</td></tr>';
+                    html += '</table></div>';
+                }
+            }
+        } else if (data.message) {
+            html += '<p class="error">' + data.message + '</p>';
+        }
+
+        resultsSection.innerHTML = html;
+
+        const videoSection = document.getElementById("video-result-section");
+        const videoContent = document.getElementById("video-result-content");
+        if (data.output_video && videoSection && videoContent) {
+            videoContent.innerHTML =
+                '<video width="700" controls>' +
+                '<source src="' + data.output_video + '" type="video/mp4">' +
+                'Your browser does not support the video tag.' +
+                '</video>';
+            videoSection.style.display = "block";
+        }
+    }
+
+    function showFormError(message) {
+        formError.textContent = message;
+        formError.style.display = "block";
+    }
+
+    function hideFormError() {
+        formError.textContent = "";
+        formError.style.display = "none";
+    }
+
+    form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        hideFormError();
+
+        resultsSection.innerHTML = "";
+        const videoSectionOnSubmit = document.getElementById("video-result-section");
+        if (videoSectionOnSubmit) {
+            videoSectionOnSubmit.style.display = "none";
+        }
+        progressSection.style.display = "block";
+        submitBtn.disabled = true;
+        lastProgress = { current_frame: 0, total_frames: 0 };
+        displayedTrackIds = new Set();
+
+        const newTrackEvents = document.getElementById("new-track-events");
+        const newTrackEmpty = document.getElementById("new-track-empty");
+        if (newTrackEvents) {
+            newTrackEvents.innerHTML = "";
+        }
+        if (newTrackEmpty) {
+            newTrackEmpty.style.display = "flex";
+        }
+
+        updateProgressUI(0, 0, 0, "Starting...");
+
+        const trackIdFieldOnSubmit = document.getElementById("track-id-field");
+        if (trackIdFieldOnSubmit) {
+            trackIdFieldOnSubmit.classList.add("field-hidden");
+        }
+
+        try {
+            const formData = new FormData(form);
+            const response = await fetch("", {
+                method: "POST",
+                body: formData,
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            });
+
+            const contentType = response.headers.get("content-type") || "";
+            if (!contentType.includes("application/json")) {
+                throw new Error("Server returned an unexpected response. Please refresh and try again.");
+            }
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                progressSection.style.display = "none";
+                submitBtn.disabled = false;
+
+                let errorMessage = "Upload failed. Please check your input.";
+                if (data.errors) {
+                    errorMessage = Object.values(data.errors).flat().join(" ");
+                } else if (data.error) {
+                    errorMessage = data.error;
+                }
+                showFormError(errorMessage);
+                return;
+            }
+
+            startPolling(
+                function onComplete(result) {
+
+                    updateProgressUI(
+                        result.total_frames,
+                        result.total_frames,
+                        100,
+                        "Completed"
+                    );
+
+                    // Show processing time
+                    if (
+                        result.processing_time !== null &&
+                        result.processing_time !== undefined
+                    ) {
+                        processingTimeValue.textContent =
+                            formatProcessingTime(
+                                result.processing_time
+                            );
+
+                        processingTime.style.display = "block";
+                    }
+
+                    setTimeout(function () {
+                        progressSection.style.display = "none";
+                        renderResults(result);
+                        submitBtn.disabled = false;
+                        form.reset();
+
+                        const trackIdField =
+                            document.getElementById("track-id-field");
+
+                        if (trackIdField) {
+                            trackIdField.classList.remove("field-hidden");
+                        }
+                    }, 400);
+                },
+                function onFailed(result) {
+                    progressSection.style.display = "none";
+                    submitBtn.disabled = false;
+                    showFormError(result.error || "Video processing failed.");
+                }
+            );
+        } catch (err) {
+            stopPolling();
+            progressSection.style.display = "none";
+            submitBtn.disabled = false;
+            showFormError("Request failed: " + err.message);
+        }
+    });
+})();
+
+(function () {
+    const imageForm = document.getElementById("image-upload-form");
+    const imageSubmitBtn = document.getElementById("image-submit-btn");
+    const imageResultsSection = document.getElementById("image-results-section");
+    const imageFormError = document.getElementById("image-form-error");
+
+    function showImageFormError(message) {
+        imageFormError.textContent = message;
+        imageFormError.style.display = "block";
+    }
+
+    function hideImageFormError() {
+        imageFormError.textContent = "";
+        imageFormError.style.display = "none";
+    }
+
+    function renderImageResults(data) {
+        const imageResultSection =
+            document.getElementById("image-result-image");
+
+        const imageResultsSection =
+            document.getElementById("image-results-section");
+
+
+        // -----------------------------
+        // Detected Image
+        // -----------------------------
+
+        if (data.output_image) {
+            imageResultSection.innerHTML =
+                '<img class="result-image zoomable" ' +
+                'src="' + data.output_image + '" ' +
+                'alt="Detected persons">';
+        } else {
+            imageResultSection.innerHTML =
+                '<div class="empty-state">' +
+                    '<p>No detected image available.</p>' +
+                '</div>';
+        }
+
+
+        // -----------------------------
+        // Detection Result
+        // -----------------------------
+
+        let html =
+            '<p class="success">Image processed successfully!</p>';
+
+        html +=
+            '<div class="stat-row">' +
+                '<div class="stat-pill">' +
+                    'Total Persons Detected' +
+                    '<strong>' +
+                        data.total_persons_detected +
+                    '</strong>' +
+                '</div>' +
+            '</div>';
+
+
+        // -----------------------------
+        // Detection Table
+        // -----------------------------
+
+        if (data.detections && data.detections.length > 0) {
+
+            html +=
+                '<div class="table-wrap">' +
+                    '<table>';
+            html +=
+                '<tr>' +
+                    '<th>Person</th>' +
+                    '<th>Confidence</th>' +
+                    '<th>Bounding Box (x1, y1, x2, y2)</th>' +
+                '</tr>';
+            data.detections.forEach(function (item) {
+
+                html += '<tr>';
+
+                html +=
+                    '<td>' +
+                        item.person_number +
+                    '</td>';
+
+                html +=
+                    '<td>' +
+                        item.confidence +
+                    '</td>';
+
+                html +=
+                    '<td>' +
+                        item.bbox.join(", ") +
+                    '</td>';
+
+                html += '</tr>';
+
+            });
+            html +=
+                    '</table>' +
+                '</div>';
+        } else {
+            html +=
+                '<p>No persons were detected in this image.</p>';
+        }
+        imageResultsSection.innerHTML = html;
+}
+
+    imageForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        hideImageFormError();
+        imageResultsSection.innerHTML = "";
+        imageSubmitBtn.disabled = true;
+        imageSubmitBtn.textContent = "Detecting...";
+
+        try {
+            const formData = new FormData(imageForm);
+            const response = await fetch("{% url 'detect_image' %}", {
+                method: "POST",
+                body: formData,
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            });
+
+            const contentType = response.headers.get("content-type") || "";
+            if (!contentType.includes("application/json")) {
+                throw new Error("Server returned an unexpected response. Please refresh and try again.");
+            }
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                let errorMessage = "Image upload failed. Please check your input.";
+                if (data.errors) {
+                    errorMessage = Object.values(data.errors).flat().join(" ");
+                } else if (data.error) {
+                    errorMessage = data.error;
+                }
+                showImageFormError(errorMessage);
+                return;
+            }
+
+            renderImageResults(data);
+            imageForm.reset();
+        } catch (err) {
+            showImageFormError("Request failed: " + err.message);
+        } finally {
+            imageSubmitBtn.disabled = false;
+            imageSubmitBtn.textContent = "Detect Persons";
+        }
+    });
+})();
+</script>
+
+</body>
+</html>

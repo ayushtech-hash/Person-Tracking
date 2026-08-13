@@ -1,17 +1,27 @@
+# pyrefly: ignore [missing-import]
 import numpy as np
 import supervision as sv
-
-from src.schemas import Detection, TrackedDetection
+from tracker.services.video.video_loader import VideoLoader
+from tracker.services.tracking.schemas import Detection,TrackedDetection
+from typing import List
 
 class PersonTracker:
     """
     Tracks detected persons using ByteTrack.
     """
+# VideoLoader.get_info("fps")
+    def __init__(self,fps=30 ):
+        self.tracker = sv.ByteTrack(
+            track_activation_threshold=0.50,
+            # track_high_thresh= 0.60,
+            # new_track_thresh= 0.40,
+            lost_track_buffer=(fps*2),
+            minimum_matching_threshold=0.9,
+            frame_rate=fps,
+            minimum_consecutive_frames=1,)
 
-    def __init__(self):
-        self.tracker = sv.ByteTrack()
-
-    def update(self, detections: list[Detection]) -> list[TrackedDetection]:
+    # def update(self, detections: list[Detection]) -> list[TrackedDetection]:
+    def update(self, detections: List[Detection]) -> List[TrackedDetection]:
 
         if len(detections) == 0:
             return []
@@ -38,7 +48,7 @@ class PersonTracker:
             sv_detections
         )
 
-        tracked_detections = []
+        tracked_detections = [] 
 
         for i in range(len(tracked.xyxy)):
 

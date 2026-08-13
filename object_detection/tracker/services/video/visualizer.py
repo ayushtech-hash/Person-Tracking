@@ -1,6 +1,5 @@
 import cv2
 
-
 class Visualizer:
     """
     Responsible for drawing annotations on video frames.
@@ -10,18 +9,26 @@ class Visualizer:
     def draw_detections(frame, detections):
         """
         Draw person detections on a frame.
-        """
+        """ 
 
         for det in detections:
 
             x1, y1, x2, y2 = map(int, det.bbox)
 
+            if det.confidence > 0.6:
+                color = (0, 255, 0)
+                thickness = 10
+
+            else:
+                color = (0, 0, 255)
+                thickness = 10
+
             cv2.rectangle(
                 frame,
                 (x1, y1),
                 (x2, y2),
-                (0, 255, 0),
-                2,
+                color,
+                thickness,
             )
 
             label = f"{det.confidence:.2f}"
@@ -29,11 +36,11 @@ class Visualizer:
             cv2.putText(
                 frame,
                 label,
-                (x1, max(20, y1 - 10)),
+                (x1, max(50, y1 - 20)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 255, 0),
-                2,
+                3.5,
+                color,
+                thickness,
             )
 
         return frame
@@ -50,8 +57,8 @@ class Visualizer:
             x1, y1, x2, y2 = map(int, det.bbox)
 
             # Default style
-            color = (150, 150, 150)
-            thickness = 2
+            color = (255, 0, 0)
+            thickness = 8
 
             # Highlight selected person
             if (
@@ -59,7 +66,7 @@ class Visualizer:
                 and det.track_id == selected_track_id
             ):
                 color = (0, 255, 0)
-                thickness = 3
+                thickness = 10
 
             cv2.rectangle(
                 frame,
@@ -77,7 +84,7 @@ class Visualizer:
                 label,
                 (x1, max(20, y1 - 10)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                3.5,
                 color,
                 2,
             )
