@@ -27,6 +27,7 @@ class PersonTrackStats(models.Model):
     last_seen = models.FloatField()
     visible_duration = models.FloatField()
     frames_seen = models.PositiveIntegerField()
+    separate_video_url = models.CharField(max_length=1000,blank=True,null=True,)
 
     class Meta:
         ordering = ["track_id"]

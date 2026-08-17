@@ -653,22 +653,80 @@ def generate_separate_video(request):
         report = TrackingReport.objects.get(
             id=report_id
         )
+
+        track_stats = PersonTrackStats.objects.get(
+            report_id=report_id,
+            track_id=track_id,
+        )
+
+        # ---------------------------------------------------------
+        # CHECK DATABASE FIRST
+        # ---------------------------------------------------------
+
+        if track_stats.separate_video_url:
+
+            print(
+                f"[SEPARATE VIDEO] "
+                f"Retrieved from DB | "
+                f"report_id={report_id} | "
+                f"track_id={track_id} | "
+                f"url={track_stats.separate_video_url}"
+            )
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "video_url": track_stats.separate_video_url,
+                    "track_id": track_id,
+                    "report_id": report_id,
+                    "source": "database",
+                }
+            )
+
+        # ---------------------------------------------------------
+        # VIDEO NOT IN DATABASE → GENERATE
+        # ---------------------------------------------------------
+
+        print(
+            f"[SEPARATE VIDEO] "
+            f"Not found in DB. Generating... | "
+            f"report_id={report_id} | "
+            f"track_id={track_id}"
+        )
+
         parts = report.output_video.strip("/").split("/")
 
         video_version = parts[2]
 
-        result = (
-            SeparateVideoGenerator.generate(
-                report_id=report_id,
-                track_id=track_id,
-                video_version=video_version
-            )
+        result = SeparateVideoGenerator.generate(
+            report_id=report_id,
+            track_id=track_id,
+            video_version=video_version,
+        )
+
+        # ---------------------------------------------------------
+        # SAVE GENERATED VIDEO URL TO DATABASE
+        # ---------------------------------------------------------
+
+        track_stats.separate_video_url = result["video_url"]
+
+        track_stats.save(
+            update_fields=["separate_video_url"]
+        )
+
+        print(
+            f"[SEPARATE VIDEO] "
+            f"Generated and saved to DB | "
+            f"report_id={report_id} | "
+            f"track_id={track_id} | "
+            f"url={result['video_url']}"
         )
 
         return JsonResponse(
             {
                 "success": True,
                 **result,
+                "source": "generated",
             }
         )
 

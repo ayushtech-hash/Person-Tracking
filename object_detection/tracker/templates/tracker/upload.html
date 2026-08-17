@@ -1,9 +1,12 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Person Tracking System</title>
+    <link rel="stylesheet" href="{% static 'tracker/css/upload.css' %}">
 
     <style>
 
@@ -685,7 +688,7 @@
             max-width:94vw;
             max-height:92vh;
             position:relative;
-            z-index:1001;
+            z-index:1;
         }
 
         #lightbox-image {
@@ -736,7 +739,7 @@
             align-items:center;
             justify-content:center;
             box-shadow:none;
-            z-index:1002;
+            z-index:2147483647;
             pointer-events:auto;
         }
 
@@ -775,6 +778,13 @@
 
 </head>
 <body data-has-video-result="{% if output_video %}true{% else %}false{% endif %}">
+<div
+    id="app-config"
+    data-progress-url="{% url 'get_progress' %}"
+    data-image-url="{% url 'detect_image' %}"
+    data-separate-video-url="{% url 'generate_separate_video' %}"
+></div>
+
 
 <div class="page">
 
@@ -1173,9 +1183,21 @@
     "lightbox-track-person"
     );
 
+    trackPersonBtn.style.display = "none";
+
     const backPersonBtn = document.getElementById(
     "lightbox-back-person"
     );
+
+    window.setTrackPersonAvailable = function (available) {
+
+    if (!trackPersonBtn) {
+        return;
+    }
+
+    trackPersonBtn.style.display =
+        available ? "inline-flex" : "none";
+    };
 
     if (
         !overlay ||
@@ -1596,31 +1618,6 @@
 
 
 (function () {
-    const imageBtn = document.getElementById("toggle-image-btn");
-    const videoBtn = document.getElementById("toggle-video-btn");
-    const imagePanel = document.getElementById("image-panel");
-    const videoPanel = document.getElementById("video-panel");
-
-    function showPanel(mode) {
-        const isImage = mode === "image";
-        imagePanel.classList.toggle("active", isImage);
-        videoPanel.classList.toggle("active", !isImage);
-        imageBtn.classList.toggle("active", isImage);
-        videoBtn.classList.toggle("active", !isImage);
-        imageBtn.setAttribute("aria-selected", isImage ? "true" : "false");
-        videoBtn.setAttribute("aria-selected", isImage ? "false" : "true");
-    }
-
-    imageBtn.addEventListener("click", function () {
-        showPanel("image");
-    });
-
-    videoBtn.addEventListener("click", function () {
-        showPanel("video");
-    });
-})();
-
-(function () {
     const form = document.getElementById("upload-form");
     if (!form) return;
 
@@ -2024,6 +2021,10 @@
                 return;
             }
 
+            if (window.setTrackPersonAvailable) {
+                window.setTrackPersonAvailable(false);
+            }
+
             startPolling(
                 function onComplete(result) {
 
@@ -2033,6 +2034,9 @@
                         100,
                         "Completed"
                     );
+                    if (window.setTrackPersonAvailable) {
+                        window.setTrackPersonAvailable(true);
+                    }
 
                     // Show processing time
                     if (
@@ -2228,6 +2232,8 @@
     });
 })();
 </script>
+
+<script src="{% static 'tracker/js/mode-toggle.js' %}"></script>
 
 </body>
 </html>
