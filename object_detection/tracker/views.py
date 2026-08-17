@@ -1,6 +1,9 @@
+# from services.video import seperate_video
+from django.http import multipartparser
 import os
 import threading
 import time
+import cv2
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.db import close_old_connections
@@ -11,7 +14,15 @@ from .services.detection.image_processor import ImageProcessor
 from .services.processor import VideoProcessor
 from .services.reporting.progress import progress
 from .services.reporting.report_generator import ReportGenerator
-import cv2
+from .models import TrackingReport,PersonTrackStats,TrackFrameEvent
+
+from .services.detection.image_processor import ImageProcessor
+from .services.processor import VideoProcessor
+from .services.video.seperate_video import SeparateVideoGenerator
+from .services.reporting.progress import progress
+from .services.reporting.report_generator import ReportGenerator
+from .services.video.video_paths import get_next_video_version, get_video_directories
+
 
 _processing_lock = threading.Lock()
 _is_processing = False
@@ -36,6 +47,8 @@ def update_track_event(
     track_id,
     frame_number,
     fps,
+    video_version,
+    report_id,
 ):
     """
     Save a new-track event with three images:
@@ -53,19 +66,9 @@ def update_track_event(
     # ---------------------------------------------------------
     # Directories
     # ---------------------------------------------------------
-
-    event_dir = os.path.join(
-        settings.MEDIA_ROOT,
-        "track_events"
-    )
-
-    crop_dir = os.path.join(
-        settings.MEDIA_ROOT,
-        "track_crops"
-    )
-
-    os.makedirs(event_dir, exist_ok=True)
-    os.makedirs(crop_dir, exist_ok=True)
+    video_dirs = get_video_directories(video_version)
+    event_dir = video_dirs["track_events"]
+    crop_dir = video_dirs["track_crops"]
 
     # ---------------------------------------------------------
     # Bounding box
@@ -210,15 +213,21 @@ def update_track_event(
     media_url = settings.MEDIA_URL.rstrip("/")
 
     full_frame_url = (
-        f"{media_url}/track_events/{full_filename}"
+    f"{media_url}/videos/"
+    f"{video_version}/track_events/"
+    f"{full_filename}"
     )
 
     person_crop_url = (
-        f"{media_url}/track_crops/{person_filename}"
+    f"{media_url}/videos/"
+    f"{video_version}/track_crops/"
+    f"{person_filename}"
     )
 
     thumbnail_url = (
-        f"{media_url}/track_crops/{thumbnail_filename}"
+    f"{media_url}/videos/"
+    f"{video_version}/track_crops/"
+    f"{thumbnail_filename}"
     )
 
     # ---------------------------------------------------------
@@ -237,6 +246,8 @@ def update_track_event(
 
     event = {
         "track_id": track_id,
+        "report_id": report_id,
+
         "frame": frame_number,
         "time_sec": round(frame_time, 2),
 
@@ -248,14 +259,107 @@ def update_track_event(
 
         # Original full frame
         "full_frame_url": full_frame_url,
+    
     }
-
     if "new_track_events" not in progress:
         progress["new_track_events"] = []
 
     progress["new_track_events"].append(event)
 
+
+
+def update_track_frame(
+    frame,
+    tracked,
+    frame_number,
+    fps,
+    report_id,
+    video_version,
+
+):
+    """
+    Save the processed full frame once and create a database
+    event for every track visible in that frame.
+    """
     
+    
+    video_dirs = get_video_directories(video_version)
+
+    frame_dir = video_dirs["track_frames"]
+
+    # ---------------------------------------------------------
+    # Save the full frame ONCE
+    # ---------------------------------------------------------
+
+    filename = (
+        f"report_{report_id}_frame_{frame_number}.jpg"
+    )
+
+    file_path = os.path.join(
+        frame_dir,
+        filename,
+    )
+
+    success = cv2.imwrite(
+        file_path,
+        frame,
+    )
+
+    if not success:
+        print(
+            f"ERROR: Failed to save track frame: {file_path}"
+        )
+        return
+
+    full_frame_url = (
+        f"{settings.MEDIA_URL.rstrip('/')}"
+        f"/videos/{video_version}/track_frames/{filename}"
+    )
+
+    frame_time = (
+        frame_number / fps
+        if fps
+        else 0
+    )
+
+    # ---------------------------------------------------------
+    # Create event for EVERY active track
+    # ---------------------------------------------------------
+
+
+    report = TrackingReport.objects.get(
+        id=report_id
+    )
+
+    for track in tracked:
+
+        track_id = int(track.track_id)
+
+        # Find/create stats row for this track
+        track_stats, created = (
+            PersonTrackStats.objects.get_or_create(
+                report=report,
+                track_id=track_id,
+                defaults={
+                    "first_seen": frame_time,
+                    "last_seen": frame_time,
+                    "visible_duration": 0,
+                    "frames_seen": 0,
+                },
+            )
+        )
+
+        # Create frame event
+        TrackFrameEvent.objects.get_or_create(
+            track=track_stats,
+            frame_number=frame_number,
+            defaults={
+                "timestamp": frame_time,
+                "full_frame_url": full_frame_url,
+            },
+        )
+
+
 
 
 def _reset_progress():
@@ -280,6 +384,9 @@ def _run_processing(
     start_time,
     end_time,
     track_id,
+    report_id,
+    video_version,
+
 ):
     global _is_processing
 
@@ -289,6 +396,22 @@ def _run_processing(
 
     try:
         processor = VideoProcessor()
+
+        def track_frame_handler(
+            frame,
+            tracked,
+            frame_number,
+            fps,
+        ):
+            update_track_frame(
+                frame=frame,
+                tracked=tracked,
+                frame_number=frame_number,
+                fps=fps,
+                report_id=report_id,
+                video_version=video_version,
+
+            )
         report = processor.process(
             input_video=input_path,
             output_video=output_path,
@@ -297,6 +420,10 @@ def _run_processing(
             selected_track_id=track_id,
             progress_callback=update_progress,
             track_event_callback=update_track_event,
+            track_frame_callback=track_frame_handler,
+            video_version=video_version,
+            report_id=report_id,
+
         )
         processing_end = time.time()
 
@@ -374,13 +501,32 @@ def upload_video(request):
             end_time = form.cleaned_data["end_time"] or None
             track_id = form.cleaned_data["track_id"]
 
+            # Create a new output workspace for this uploaded video
+            video_version = get_next_video_version()
+
+            video_dirs = get_video_directories(
+                video_version
+            )
+
             fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, "uploads"))
             filename = fs.save(video.name, video)
 
             input_path = os.path.join(settings.MEDIA_ROOT, "uploads", filename)
             output_filename = f"processed_{filename}"
-            output_path = os.path.join(settings.MEDIA_ROOT, "outputs", output_filename)
 
+            output_path = os.path.join(video_dirs["output_video"],output_filename,)
+            input_video_url = (f"/media/uploads/{filename}")
+            output_video_url = (
+                f"/media/videos/"
+                f"{video_version}/output_video/"
+                f"{output_filename}"
+            )
+
+            tracking_report = ReportGenerator.create_processing_report(
+                output_video_url=output_video_url,
+                input_video_url=input_video_url,
+                selected_track_id=track_id,
+            )
             _reset_progress()
 
             thread = threading.Thread(
@@ -393,6 +539,10 @@ def upload_video(request):
                     start_time,
                     end_time,
                     track_id,
+                    tracking_report.id,
+                    video_version,       
+
+
                 ),
                 daemon=True,
             )
@@ -470,3 +620,102 @@ def detect_image(request):
 
 def get_progress(request):
     return JsonResponse(progress)
+
+def generate_separate_video(request):
+    if request.method != "POST":
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Method not allowed.",
+            },
+            status=405,
+        )
+
+    try:
+        report_id = int(
+            request.POST.get("report_id")
+        )
+
+        track_id = int(
+            request.POST.get("track_id")
+        )
+
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Invalid report_id or track_id.",
+            },
+            status=400,
+        )
+
+    try:
+        report = TrackingReport.objects.get(
+            id=report_id
+        )
+        parts = report.output_video.strip("/").split("/")
+
+        video_version = parts[2]
+
+        result = (
+            SeparateVideoGenerator.generate(
+                report_id=report_id,
+                track_id=track_id,
+                video_version=video_version
+            )
+        )
+
+        return JsonResponse(
+            {
+                "success": True,
+                **result,
+            }
+        )
+
+    except ValueError as exc:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": str(exc),
+            },
+            status=400,
+        )
+
+    except Exception as exc:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": str(exc),
+            },
+            status=500,
+        )
+
+def test_separate_video(request):
+
+    report_id = 3
+    track_id = 1    
+
+    try:
+        report = TrackingReport.objects.get(
+            id=report_id
+        )
+        parts = report.output_video.strip("/").split("/")
+
+        video_version = parts[2]
+        result = SeparateVideoGenerator.generate(
+            report_id=report_id,
+            track_id=track_id,
+            video_version=video_version,
+
+        )
+
+        return JsonResponse({
+            "success": True,
+            **result,
+        })
+
+    except Exception as exc:
+        return JsonResponse({
+            "success": False,
+            "error": str(exc),
+        }, status=500)

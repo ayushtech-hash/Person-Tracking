@@ -6,7 +6,22 @@ from tracker.models import PersonTrackStats, TrackingReport,TrackFrameEvent
 class ReportGenerator:
     """
     Generates reports for tracked persons.
-    """
+    """ 
+
+    @staticmethod
+    def create_processing_report(
+        output_video_url: str,
+        input_video_url: str = "",
+        selected_track_id: Optional[int] = None,
+    ) -> TrackingReport:
+
+        return TrackingReport.objects.create(
+            input_video=input_video_url,
+            output_video=output_video_url,
+            peak_persons_detected=0,
+            total_visible_time=0,
+            selected_track_id=selected_track_id,
+        )
 
 
     @staticmethod

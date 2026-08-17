@@ -684,6 +684,8 @@
             justify-content:center;
             max-width:94vw;
             max-height:92vh;
+            position:relative;
+            z-index:1001;
         }
 
         #lightbox-image {
@@ -734,6 +736,8 @@
             align-items:center;
             justify-content:center;
             box-shadow:none;
+            z-index:1002;
+            pointer-events:auto;
         }
 
         #lightbox-close:hover {
@@ -1109,6 +1113,19 @@
             src=""
             alt=""
         >
+        <video
+            id="lightbox-video"
+            controls
+            preload="metadata"
+            style="display:none;"
+        >
+            <source
+                id="lightbox-video-source"
+                src=""
+                type="video/mp4"
+            >
+            Your browser does not support the video tag.
+        </video>
         <div id="lightbox-caption"></div>
         <div id="lightbox-actions">
             <button
@@ -1117,6 +1134,14 @@
             >
                 View Full Frame
             </button>
+
+            <button
+                type="button"
+                id="lightbox-track-person"
+            >
+                Track Person
+            </button>
+
             <button
                 type="button"
                 id="lightbox-back-person"
@@ -1135,15 +1160,21 @@
 (function () { 
     const overlay = document.getElementById("lightbox-overlay");
     const overlayImg = document.getElementById("lightbox-image");
+    const overlayVideo = document.getElementById("lightbox-video");
+    const overlayVideoSource = document.getElementById("lightbox-video-source");
     const overlayCaption = document.getElementById("lightbox-caption");
     const closeBtn = document.getElementById("lightbox-close");
 
     const viewFullBtn = document.getElementById(
-        "lightbox-view-full"
+    "lightbox-view-full"
+    );
+
+    const trackPersonBtn = document.getElementById(
+    "lightbox-track-person"
     );
 
     const backPersonBtn = document.getElementById(
-        "lightbox-back-person"
+    "lightbox-back-person"
     );
 
     if (
@@ -1153,23 +1184,35 @@
     ) {
         return;
     }
-
+    
     let currentPersonImage = "";
     let currentFullFrameImage = "";
+    let currentSeparateVideo = "";
+    let currentTrackId = null;
+    let currentReportId = null;
     let showingFullFrame = false;
 
     function openLightbox(
-    thumbnailSrc,
-    alt,
-    caption,
-    personCropSrc,
-    fullFrameSrc
+        thumbnailSrc,
+        alt,
+        caption,
+        personCropSrc,
+        fullFrameSrc,
+        trackId,
+        reportId,
+
 ) {
     currentPersonImage =
         personCropSrc || thumbnailSrc;
 
     currentFullFrameImage =
         fullFrameSrc || "";
+
+    currentTrackId =
+        trackId || null;
+
+    currentReportId =
+        reportId || null;
 
     showingFullFrame = false;
 
@@ -1194,7 +1237,7 @@
 
     if (backPersonBtn) {
         backPersonBtn.style.display =
-            "none";
+            "inline-flex";
     }
 
     overlay.classList.add("open");
@@ -1232,6 +1275,12 @@
     }
 
     function showPersonCrop() {
+        overlayVideo.pause();
+        overlayVideoSource.src = "";
+        overlayVideo.load();
+        overlayVideo.style.display = "none";
+        overlayImg.style.display = "block";
+
         if (!currentPersonImage) {
             return;
         }
@@ -1255,6 +1304,48 @@
                 " — Full Frame",
                 ""
             );
+    }
+
+    function showSeparateVideo(videoUrl) {
+
+        if (!videoUrl) {
+            return;
+        }
+
+        currentSeparateVideo = videoUrl;
+
+        // Hide the image
+        overlayImg.style.display = "none";
+
+        // Show the video
+        overlayVideo.style.display = "block";
+
+        // Set the generated video URL
+        overlayVideoSource.src = videoUrl;
+
+        // Reload the video element with the new source
+        overlayVideo.load();
+
+        // Try to start playback
+        overlayVideo.play().catch(function () {
+            // Browser may block autoplay.
+            // User can press the play button.
+        });
+
+        // Update caption
+        overlayCaption.textContent =
+            "Track ID " +
+            currentTrackId +
+            " — Separate Video";
+
+        // Hide image-related navigation buttons
+        if (viewFullBtn) {
+            viewFullBtn.style.display = "none";
+        }
+
+        if (backPersonBtn) {
+            backPersonBtn.style.display = "none";
+        }
     }
 
     function closeLightbox() {
@@ -1337,7 +1428,9 @@
                     image.alt,
                     caption,
                     personCropSrc,
-                    fullFrameSrc
+                    fullFrameSrc,
+                    image.dataset.trackId,
+                    image.dataset.reportId
                 );
                 
 
@@ -1346,14 +1439,15 @@
 
             // Existing generic zoomable images
             if (directImg) {
-
-                
+  
                 openLightbox(
                     image.src,
                     image.alt,
                     caption,
                     personCropSrc,
-                    fullFrameSrc
+                    fullFrameSrc,
+                    eventData.track_id,
+                    eventData.report_id
                 );
                 
 
@@ -1387,6 +1481,74 @@
             }
         );
     }
+
+
+    if (trackPersonBtn) {
+        trackPersonBtn.addEventListener(
+            "click",
+            async function () {
+                if (!currentTrackId || !currentReportId) {
+                    alert("Track ID or Report ID is missing.");
+                    return;
+                }
+                trackPersonBtn.disabled = true;
+                trackPersonBtn.textContent = "Generating...";
+
+                try {
+                    const formData = new FormData();
+                    formData.append(
+                        "track_id",
+                        currentTrackId
+                    );
+
+                    formData.append(
+                        "report_id",
+                        currentReportId
+                    );
+                    const response = await fetch(
+                        "{% url 'generate_separate_video' %}",
+                        {
+                            method: "POST",
+                            headers: {
+                                "X-CSRFToken":
+                                    document.querySelector(
+                                        "[name=csrfmiddlewaretoken]"
+                                    ).value,
+                                "X-Requested-With": "XMLHttpRequest"
+                            },
+                            body: formData
+                        }
+                    );
+
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(
+                            data.error ||
+                            "Failed to generate separate video."
+                        );
+                    }
+                    console.log("Separate video generated:",data.video_url);
+                    
+                    showSeparateVideo(
+                        data.video_url
+                    );
+                } catch (error) {
+                    console.error(
+                        "Separate video error:",
+                        error
+                    );
+                    alert(
+                        error.message ||
+                        "Failed to generate separate video."
+                    );
+                } finally {
+                    trackPersonBtn.disabled = false;
+                    trackPersonBtn.textContent =
+                        "Track Person";
+                }
+            }
+        );
+    }
     // ---------------------------------------------------------
     // Back to Person
     // ---------------------------------------------------------
@@ -1403,7 +1565,13 @@
     }
     closeBtn.addEventListener(
         "click",
-        closeLightbox
+        function () {
+            if (currentSeparateVideo) {
+                showPersonCrop();
+                return;
+            }
+            closeLightbox();
+        }
     );
     overlay.addEventListener(
         "click",
@@ -1575,6 +1743,11 @@
 
 
     function renderNewTrackEvents(events) {
+
+        console.log(
+        "NEW TRACK EVENTS FROM BACKEND:",
+        events
+        );
         const container = document.getElementById("new-track-events");
         const emptyState = document.getElementById("new-track-empty");
 
@@ -1661,7 +1834,13 @@
                     event.track_id +
                     " at frame " +
                     event.frame;
+
+                image.dataset.trackId = event.track_id;
+                image.dataset.reportId = event.report_id;
+
                 image.loading = "lazy";
+
+                
                 
 
 

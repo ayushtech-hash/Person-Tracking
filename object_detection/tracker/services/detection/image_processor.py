@@ -1,7 +1,5 @@
 import os
-
 import cv2
-
 from tracker.services.detection.detector import PersonDetector
 from tracker.services.video.visualizer import Visualizer
 

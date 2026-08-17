@@ -141,6 +141,10 @@ class VideoProcessor:
         selected_track_id: Optional[int] = None,
         progress_callback=None,
         track_event_callback=None,
+        track_frame_callback=None,
+        video_version=None,
+        report_id = None
+
 
 
     ):
@@ -301,76 +305,11 @@ class VideoProcessor:
                             track_id=track_id,
                             frame_number=current_frame,
                             fps=info["fps"],
+                            video_version=video_version,
+                            report_id=report_id
                         )
 
-            # Track IDs already seen during this video
-            # if not hasattr(self, "_seen_track_ids"):
-            #     self._seen_track_ids = set()
-
-            # for track in tracked:
-            #     track_id = int(track.track_id)
-
-            #     # New tracker ID
-            #     is_new_track = track_id not in self._seen_track_ids
-
-            #     if is_new_track:
-            #         self._seen_track_ids.add(track_id)
-
-            #         # Create snapshot from current frame
-            #         event_frame = frame.copy()
-
-            #         # Draw ALL active tracks
-            #         for active_track in tracked:
-            #             active_id = int(active_track.track_id)
-            #             x1, y1, x2, y2 = map(int, active_track.bbox)
-
-            #             if active_id == track_id:
-            #                 # NEW TRACK → BLACK
-            #                 box_color = (0, 0, 0)
-            #                 thickness = 4
-            #                 label = f"NEW ID: {active_id}"
-            #                 label_thickness = 3
-            #             else:
-            #                 # EXISTING TRACK → GREEN
-            #                 box_color = (0, 255, 0)
-            #                 thickness = 2
-            #                 label = f"ID: {active_id}"
-            #                 label_thickness = 2
-
-            #             # Bounding box
-            #             cv2.rectangle(
-            #                 event_frame,
-            #                 (x1, y1),
-            #                 (x2, y2),
-            #                 box_color,
-            #                 thickness,
-            #             )
-
-            #             # Label
-            #             cv2.putText(
-            #                 event_frame,
-            #                 label,
-            #                 (x1, max(30, y1 - 10)),
-            #                 cv2.FONT_HERSHEY_SIMPLEX,
-            #                 0.8,
-            #                 box_color,
-            #                 label_thickness,
-            #                 cv2.LINE_AA,
-            #             )
-
-            #         print(
-            #             f"NEW TRACK ID={track_id} "
-            #             f"FRAME={current_frame}"
-            #         )
-
-            #         if track_event_callback:
-            #             track_event_callback(
-            #                 frame=event_frame,
-            #                 track_id=track_id,
-            #                 frame_number=current_frame,
-            #                 fps=info["fps"],
-            #             )
-
+           
             print("===================TRACK ==========================")
 
             for track in tracked:
@@ -388,7 +327,23 @@ class VideoProcessor:
                     
 
             Visualizer.draw_tracks(frame, tracked, selected_track_id=selected_track_id)
-            # frame = Visualizer.draw_detections(frame, detections)
+            
+            # ---------------------------------------------------------
+            # Save full frame for every active track
+            # ---------------------------------------------------------
+            print(
+                f"DEBUG: frame={current_frame}, "
+                f"tracked={len(tracked)}, "
+                f"callback={track_frame_callback is not None}"
+            )
+            if track_frame_callback and tracked:
+
+                track_frame_callback(
+                    frame=frame,
+                    tracked=tracked,
+                    frame_number=current_frame,
+                    fps=info["fps"],
+                )
 
             writer.write(frame)
             current_frame+=1
