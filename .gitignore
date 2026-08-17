@@ -1,0 +1,5 @@
+myenv/
+.env/
+object_detection/media/uploads/
+object_detection/media/videos/
+object_detection/db.sqlite3
