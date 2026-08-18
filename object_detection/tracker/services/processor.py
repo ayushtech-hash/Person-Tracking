@@ -21,7 +21,7 @@ class VideoProcessor:
 
     def __init__(self):
         self.detector = PersonDetector()
-        self.tracker = PersonTracker()
+        self.tracker = None
         self.presence_tracker = PresenceTracker()
 
 
@@ -146,7 +146,6 @@ class VideoProcessor:
         report_id = None
 
 
-
     ):
         """
         Process the input video and save the output video.
@@ -155,8 +154,10 @@ class VideoProcessor:
         loader = VideoLoader(input_video)
 
         info = loader.get_info()
+        
+        tracker_type = "deepsort"
 
-        self.tracker = PersonTracker(fps=info["fps"])
+        self.tracker = PersonTracker(fps=info["fps"], tracker_type=tracker_type,)
 
         if end_time is None:
             total_seconds = int(info["duration"])
@@ -247,7 +248,7 @@ class VideoProcessor:
 
             """tracking multiple persons"""
 
-            tracked = self.tracker.update(detections)
+            tracked = self.tracker.update(detections,frame)
 
             
 

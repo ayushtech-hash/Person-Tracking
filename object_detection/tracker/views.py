@@ -434,7 +434,12 @@ def _run_processing(
             2
         )
 
-        output_video_url = f"/media/outputs/{output_filename}"
+        output_video_url = (
+            f"/media/videos/"
+            f"{video_version}/output_video/"
+            f"{output_filename}"
+        )        
+        
         input_video_url = f"/media/uploads/{input_filename}"
 
         progress["output_video"] = output_video_url

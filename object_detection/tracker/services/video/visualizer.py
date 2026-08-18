@@ -57,16 +57,16 @@ class Visualizer:
             x1, y1, x2, y2 = map(int, det.bbox)
 
             # Default style
-            color = (255, 0, 0)
-            thickness = 8
+            color = (0, 0, 0)
+            thickness = 4
 
             # Highlight selected person
             if (
                 selected_track_id is not None
                 and det.track_id == selected_track_id
             ):
-                color = (0, 255, 0)
-                thickness = 10
+                color = (0, 0, 0)
+                thickness = 3
 
             cv2.rectangle(
                 frame,
@@ -84,7 +84,7 @@ class Visualizer:
                 label,
                 (x1, max(20, y1 - 10)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                3.5,
+                1,
                 color,
                 2,
             )
