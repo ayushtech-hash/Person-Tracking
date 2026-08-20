@@ -195,6 +195,109 @@ class SeparateVideoGenerator:
         }
 
     @staticmethod
+    def generate_merged(report_id, track_ids, video_version, fps=25.0):
+        """Generate one video by concatenating each track's frames in ID order."""
+        track_ids = sorted({int(track_id) for track_id in track_ids})
+
+        if len(track_ids) < 2:
+            raise ValueError("At least two track IDs are required for a merged video.")
+
+        events_by_track = []
+        for track_id in track_ids:
+            frame_events = list(
+                TrackFrameEvent.objects.filter(
+                    track__report_id=report_id,
+                    track__track_id=track_id,
+                ).order_by("frame_number")
+            )
+            if not frame_events:
+                raise ValueError(f"No frames found for Track ID {track_id}.")
+            events_by_track.append((track_id, frame_events))
+
+        output_dir = (
+            Path(settings.MEDIA_ROOT)
+            / "videos"
+            / video_version
+            / "separate_video"
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        track_id_suffix = "_".join(str(track_id) for track_id in track_ids)
+        output_filename = f"report_{report_id}_tracks_{track_id_suffix}.mp4"
+        output_path = output_dir / output_filename
+
+        video_url = (
+            f"{settings.MEDIA_URL.rstrip('/')}"
+            f"/videos/{video_version}/separate_video/{output_filename}"
+        )
+
+        # The filename includes the ordered IDs, so it can safely serve as a
+        # cache for the same report and selection.
+        if output_path.exists():
+            return {
+                "video_url": video_url,
+                "track_ids": track_ids,
+                "report_id": report_id,
+                "source": "filesystem",
+            }
+
+        first_frame = None
+        for _, frame_events in events_by_track:
+            for event in frame_events:
+                first_frame = cv2.imread(
+                    str(SeparateVideoGenerator._get_frame_path(event.full_frame_url))
+                )
+                if first_frame is not None:
+                    break
+            if first_frame is not None:
+                break
+
+        if first_frame is None:
+            raise ValueError("No valid frames were found for the selected tracks.")
+
+        height, width = first_frame.shape[:2]
+        writer = VideoWriter(
+            output_path=str(output_path), fps=fps, width=width, height=height
+        )
+        frames_written = 0
+
+        try:
+            # Outer loop deliberately preserves the required sequence:
+            # lowest track ID first, then ascending frame number for that ID.
+            for track_id, frame_events in events_by_track:
+                print(
+                    f"[MERGED VIDEO] Extracting frames for track_id={track_id}"
+                )
+                for event in frame_events:
+                    frame = cv2.imread(
+                        str(SeparateVideoGenerator._get_frame_path(event.full_frame_url))
+                    )
+                    if frame is None:
+                        continue
+                    if frame.shape[1] != width or frame.shape[0] != height:
+                        frame = cv2.resize(frame, (width, height))
+                    writer.write(frame)
+                    frames_written += 1
+                    print(
+                        f"[MERGED VIDEO] track_id={track_id} "
+                        f"frame_number={event.frame_number} written"
+                    )
+        finally:
+            writer.release()
+
+        if frames_written == 0:
+            raise ValueError("No valid frames were written.")
+
+        SeparateVideoGenerator.convert_to_browser_format(str(output_path))
+
+        return {
+            "video_url": video_url,
+            "track_ids": track_ids,
+            "report_id": report_id,
+            "frames": frames_written,
+        }
+
+    @staticmethod
     def _get_frame_path(full_frame_url):
 
         media_url = settings.MEDIA_URL.rstrip("/")
@@ -209,4 +312,3 @@ class SeparateVideoGenerator:
             Path(settings.MEDIA_ROOT)
             / relative_path
         )
-    

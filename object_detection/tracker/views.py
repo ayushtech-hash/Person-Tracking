@@ -1,4 +1,5 @@
 # from services.video import seperate_video
+import json
 from django.http import multipartparser
 import os
 import threading
@@ -161,7 +162,7 @@ def update_track_event(
 
     # Crop only the upper half.
     thumbnail = original_frame[
-        y1:midpoint_y,
+        y1:y2,
         x1:x2
     ].copy()
 
@@ -637,19 +638,23 @@ def generate_separate_video(request):
         )
 
     try:
-        report_id = int(
-            request.POST.get("report_id")
-        )
+        report_id = int(request.POST.get("report_id"))
+        track_ids_payload = request.POST.get("track_ids")
 
-        track_id = int(
-            request.POST.get("track_id")
-        )
+        if track_ids_payload:
+            track_ids = sorted({int(track_id) for track_id in json.loads(track_ids_payload)})
+            if len(track_ids) < 2:
+                raise ValueError
+            track_id = None
+        else:
+            track_id = int(request.POST.get("track_id"))
+            track_ids = None
 
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, json.JSONDecodeError):
         return JsonResponse(
             {
                 "success": False,
-                "error": "Invalid report_id or track_id.",
+                "error": "Invalid report_id or track ID selection.",
             },
             status=400,
         )
@@ -658,6 +663,40 @@ def generate_separate_video(request):
         report = TrackingReport.objects.get(
             id=report_id
         )
+
+        if track_ids:
+            print(
+                f"[MERGED VIDEO] Requested track_ids={track_ids} "
+                f"for report_id={report_id}"
+            )
+            known_track_ids = set(
+                PersonTrackStats.objects.filter(
+                    report_id=report_id,
+                    track_id__in=track_ids,
+                ).values_list("track_id", flat=True)
+            )
+            missing_track_ids = set(track_ids) - known_track_ids
+            if missing_track_ids:
+                missing_ids = ", ".join(
+                    str(track_id) for track_id in sorted(missing_track_ids)
+                )
+                raise ValueError(f"Track ID(s) not found: {missing_ids}.")
+
+            parts = report.output_video.strip("/").split("/")
+            video_version = parts[2]
+            result = SeparateVideoGenerator.generate_merged(
+                report_id=report_id,
+                track_ids=track_ids,
+                video_version=video_version,
+            )
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    **result,
+                    "source": result.get("source", "generated"),
+                }
+            )
 
         track_stats = PersonTrackStats.objects.get(
             report_id=report_id,

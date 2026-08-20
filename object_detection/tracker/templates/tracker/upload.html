@@ -581,12 +581,103 @@
             width:100%;
             height:100%;
             display:block;
-            object-fit:cover;
+            /* Preserve the entire person crop inside the fixed thumbnail area. */
+            object-fit:contain;
+            object-position:center;
             transition:transform 0.2s ease;
         }
 
         .new-track-event .thumb-wrap:hover img {
-            transform:scale(1.06);
+            transform:scale(1);
+        }
+
+        .new-track-event {
+            position: relative;
+            cursor: pointer;
+        }
+
+        .new-track-event.selected {
+            outline: 3px solid #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+        }
+
+        #new-track-selection-info {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: 14px;
+            padding: 10px 12px;
+            border: 1px solid #dce2ff;
+            border-radius: 10px;
+            background: #f6f7ff;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .selected-people-summary {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #new-track-selection-count {
+            display: inline-grid;
+            min-width: 22px;
+            height: 22px;
+            place-items: center;
+            padding: 0 6px;
+            border-radius: 999px;
+            background: var(--primary);
+            color: #fff;
+            font-size: 11px;
+        }
+
+        #track-selected-people {
+            padding: 7px 11px;
+            border-radius: 8px;
+            font-size: 12px;
+            white-space: nowrap;
+            box-shadow: 0 2px 5px rgba(79,94,255,0.25);
+        }
+
+        #track-selection-guide {
+            display:flex;
+            gap:8px;
+            align-items:flex-start;
+            margin:14px 0 0;
+            padding:10px 11px;
+            border:1px solid #e4e7f1;
+            border-radius:9px;
+            background:#fafbfe;
+            color:var(--text-muted);
+            font-size:12px;
+            line-height:1.45;
+        }
+
+        #track-selection-guide::before {
+            content:"i";
+            display:grid;
+            width:17px;
+            height:17px;
+            flex:0 0 17px;
+            place-items:center;
+            border-radius:50%;
+            background:#e8ebff;
+            color:var(--primary);
+            font-size:11px;
+            font-weight:800;
+        }
+
+        #track-selection-guide.ready {
+            border-color:#cfd7ff;
+            background:#f4f6ff;
+            color:#4c5678;
+        }
+
+        .new-track-event.selection-disabled {
+            opacity:0.68;
         }
 
         .new-track-event .thumb-wrap::after {
@@ -648,47 +739,107 @@
             display:none;
             position:fixed;
             inset:0;
-            background:rgba(15,17,26,0.82);
+            background:rgba(12, 16, 29, 0.72);
+            backdrop-filter:blur(8px);
             z-index:1000;
             align-items:center;
             justify-content:center;
-            padding:40px 24px;
+            padding:28px;
         }
 
         #lightbox-overlay.open {
             display:flex;
         }
 
-        #lightbox-overlay img {
-            max-width:min(92vw, 1100px);
-            max-height:88vh;
-            width:auto;
-            height:auto;
-            border-radius:12px;
-            box-shadow:0 20px 60px rgba(0,0,0,0.5);
-            display:block;
-        }
-
-        #lightbox-caption {
-            position:absolute;
-            bottom:28px;
-            left:0;
-            right:0;
-            text-align:center;
-            color:#fff;
-            font-size:13px;
-            opacity:0.85;
-        }
-
         #lightbox-content {
             display:flex;
             flex-direction:column;
-            align-items:center;
-            justify-content:center;
-            max-width:94vw;
-            max-height:92vh;
+            width:min(960px, 100%);
+            max-height:calc(100vh - 56px);
             position:relative;
             z-index:1;
+            overflow:hidden;
+            border:1px solid rgba(255,255,255,0.5);
+            border-radius:18px;
+            background:#fff;
+            box-shadow:0 28px 90px rgba(0,0,0,0.38);
+            animation:lightbox-enter 0.18s ease-out;
+        }
+
+        @keyframes lightbox-enter {
+            from { opacity:0; transform:translateY(10px) scale(0.985); }
+            to { opacity:1; transform:translateY(0) scale(1); }
+        }
+
+        #lightbox-header {
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap:16px;
+            padding:17px 18px 15px;
+            border-bottom:1px solid var(--border);
+            background:linear-gradient(135deg, #fbfcff, #f3f5ff);
+        }
+
+        #lightbox-header-info { min-width:0; }
+
+        #lightbox-title {
+            color:var(--text);
+            font-size:16px;
+            font-weight:750;
+            letter-spacing:-0.01em;
+        }
+
+        #lightbox-caption {
+            display:none;
+        }
+
+        #lightbox-media {
+            display:grid;
+            position:relative;
+            min-height:280px;
+            max-height:calc(100vh - 230px);
+            place-items:center;
+            overflow:auto;
+            background:#141827;
+        }
+
+        #lightbox-loading {
+            display:none;
+            position:absolute;
+            inset:0;
+            z-index:2;
+            align-items:center;
+            justify-content:center;
+            gap:10px;
+            background:rgba(15, 19, 33, 0.58);
+            color:#fff;
+            font-size:13px;
+            font-weight:650;
+            backdrop-filter:blur(2px);
+        }
+
+        #lightbox-loading-spinner {
+            width:20px;
+            height:20px;
+            border:2px solid rgba(255,255,255,0.35);
+            border-top-color:#fff;
+            border-radius:50%;
+            animation:lightbox-spin 0.75s linear infinite;
+        }
+
+        @keyframes lightbox-spin {
+            to { transform:rotate(360deg); }
+        }
+
+        #lightbox-overlay img,
+        #lightbox-video {
+            display:block;
+            max-width:100%;
+            max-height:calc(100vh - 230px);
+            width:auto;
+            height:auto;
+            object-fit:contain;
         }
 
         #lightbox-image {
@@ -697,25 +848,61 @@
 
         #lightbox-actions {
             display:flex;
+            justify-content:flex-end;
+            flex-wrap:wrap;
             gap:10px;
-            margin-top:16px;
+            padding:14px 18px 16px;
+            border-top:1px solid var(--border);
+            background:#fff;
+        }
+
+        #lightbox-track-guide {
+            display:none;
+            width:100%;
+            margin:0 0 2px;
+            padding:9px 10px;
+            border:1px solid #e2e6f2;
+            border-radius:8px;
+            background:#f8f9fd;
+            color:var(--text-muted);
+            font-size:12px;
+            line-height:1.4;
         }
 
         #lightbox-actions button {
-            background:rgba(255,255,255,0.95);
-            color:var(--text);
-            border:none;
-            padding:9px 16px;
-            border-radius:9px;
+            background:#f5f6fb;
+            color:#343a54;
+            border:1px solid #e2e5f0;
+            padding:8px 13px;
+            border-radius:8px;
             font-size:13px;
             font-weight:600;
             cursor:pointer;
-            box-shadow:0 2px 8px rgba(0,0,0,0.18);
+            box-shadow:none;
+        }
+
+        #lightbox-actions button:not([style*="display: none"]):not([style*="display:none"]) {
+            min-height:36px;
         }
 
         #lightbox-actions button:hover {
-            background:#fff;
+            background:#ecefff;
+            border-color:#d7dcff;
+            color:var(--primary);
             transform:translateY(-1px);
+        }
+
+        #lightbox-actions #lightbox-track-person {
+            border-color:transparent;
+            background:linear-gradient(135deg, var(--primary), #6f5cff);
+            color:#fff;
+            box-shadow:0 3px 8px rgba(79,94,255,0.24);
+        }
+
+        #lightbox-actions #lightbox-back-person {
+            background:#f5f6fb;
+            color:#343a54;
+            border-color:#e2e5f0;
         }
 
         #lightbox-actions #lightbox-back-person {
@@ -723,30 +910,38 @@
         }
 
         #lightbox-close {
-            position:absolute;
-            top:20px;
-            right:24px;
-            width:40px;
-            height:40px;
-            border-radius:50%;
-            background:rgba(255,255,255,0.12);
-            color:#fff;
-            border:none;
-            font-size:20px;
+            width:32px;
+            height:32px;
+            flex:0 0 auto;
+            border-radius:8px;
+            background:transparent;
+            color:var(--text-muted);
+            border:1px solid transparent;
+            font-size:22px;
             line-height:1;
             cursor:pointer;
             display:flex;
             align-items:center;
             justify-content:center;
             box-shadow:none;
-            z-index:2147483647;
-            pointer-events:auto;
         }
 
         #lightbox-close:hover {
-            background:rgba(255,255,255,0.22);
+            background:#fff;
+            border-color:var(--border);
+            color:var(--text);
             transform:none;
             box-shadow:none;
+        }
+
+        @media (max-width:600px) {
+            #lightbox-overlay { padding:14px; }
+            #lightbox-content { max-height:calc(100vh - 28px); border-radius:14px; }
+            #lightbox-header { padding:14px; }
+            #lightbox-media { min-height:220px; max-height:calc(100vh - 205px); }
+            #lightbox-overlay img, #lightbox-video { max-height:calc(100vh - 205px); }
+            #lightbox-actions { padding:12px 14px; justify-content:stretch; }
+            #lightbox-actions button { flex:1 1 auto; }
         }
 
         @media (max-width:860px){
@@ -977,6 +1172,9 @@
     <p style="color:var(--text-muted); font-size:13px; margin:0;">
         A snapshot appears here whenever the tracker assigns a new ID.
     </p>
+    <div id="track-selection-guide" role="status">
+        You can track a person after video processing is complete. Then select thumbnails to track multiple IDs.
+    </div>
     <div id="new-track-empty" class="empty-state" style="margin-top:16px;">
         <div class="empty-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -986,6 +1184,21 @@
             </svg>
         </div>
         <p>New track snapshots will appear here once processing starts.</p>
+    </div>
+    <div
+        id="new-track-selection-info"
+        style="display: none;"
+    >
+        <div class="selected-people-summary">
+            <span id="new-track-selection-count">0</span>
+            <span>people selected</span>
+        </div>
+        <button
+            type="button"
+            id="track-selected-people"
+        >
+            Track Selected People
+        </button>
     </div>
     <div id="new-track-events"></div>
 </div>
@@ -1149,10 +1362,19 @@
                 >
                 Your browser does not support the video tag.
             </video>
+
+            <div id="lightbox-loading" role="status">
+                <span id="lightbox-loading-spinner"></span>
+                <span id="lightbox-loading-text">Generating video…</span>
+            </div>
         </div>
 
         <!-- Actions -->
         <div id="lightbox-actions">
+
+            <p id="lightbox-track-guide">
+                You can track a person once video processing is complete. Select thumbnails after processing to track multiple IDs.
+            </p>
 
             <button
                 type="button"
@@ -1229,9 +1451,7 @@
 
     if (trackIdField) {
         trackIdField.id = "track-id-field";
-        if (!hasInitialVideoResult) {
-            trackIdField.classList.add("field-hidden");
-        }
+        trackIdField.classList.add("field-hidden");
     }
 })();
 

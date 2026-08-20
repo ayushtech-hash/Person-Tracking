@@ -571,12 +571,14 @@ img.result-image{
     width:100%;
     height:100%;
     display:block;
-    object-fit:cover;
+    /* Preserve the entire person crop inside the fixed thumbnail area. */
+    object-fit:contain;
+    object-position:center;
     transition:transform 0.2s ease;
 }
 
 .new-track-event .thumb-wrap:hover img {
-    transform:scale(1.06);
+    transform:scale(1);
 }
 
 .new-track-event .thumb-wrap::after {

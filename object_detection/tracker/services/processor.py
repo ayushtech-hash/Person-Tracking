@@ -1,6 +1,7 @@
 # from tracker.services import video_loader
 # from tracker.services import video_loader
 # from tracker.services import video_loader
+from logging import info
 from django.template import loader
 from tracker.services.tracking import presence_tracker
 from tracker.services.video.video_loader import VideoLoader
@@ -15,6 +16,8 @@ from typing import Optional
 import subprocess
 import cv2
 import os, time
+# from tracker.services.tracking.sam2_tracker import SAM2Tracker
+from tracker.services.tracking.schemas import TrackedDetection
 
 
 class VideoProcessor:
@@ -155,9 +158,30 @@ class VideoProcessor:
 
         info = loader.get_info()
         
-        tracker_type = "deepsort"
+        tracker_type = "bytetrack"
 
-        self.tracker = PersonTracker(fps=info["fps"], tracker_type=tracker_type,)
+        if tracker_type == "sam2":
+
+            SAM2_CHECKPOINT = (
+                "checkpoints/sam2.1_hiera_large.pt"
+            )
+
+            SAM2_CONFIG = (
+                "configs/sam2.1/sam2.1_hiera_l.yaml"
+            )
+
+            self.tracker = SAM2Tracker(
+                config_path=SAM2_CONFIG,
+                checkpoint_path=SAM2_CHECKPOINT,
+            )
+
+        else:
+
+            self.tracker = PersonTracker(
+                fps=info["fps"],
+                tracker_type=tracker_type,
+            )
+
 
         if end_time is None:
             total_seconds = int(info["duration"])
@@ -222,34 +246,140 @@ class VideoProcessor:
 
             """detecting multiple persons"""
 
-            detections = self.detector.detect(frame)
+            # detections = self.detector.detect(frame)
 
-            processed_frames += 1
+            # processed_frames += 1
             
-            elapsed = time.time() - start_time
+            # elapsed = time.time() - start_time
 
-            if elapsed >= 1.0:
-                print(f"YOLO processing FPS: {processed_frames / elapsed:.2f}")
-                start_time = time.time()
-                processed_frames = 0
+            # if elapsed >= 1.0:
+            #     print(f"YOLO processing FPS: {processed_frames / elapsed:.2f}")
+            #     start_time = time.time()
+            #     processed_frames = 0
 
 
-            # print("=====================detection=========================")
-            for detection in detections:
-                print(
-                    f"frame={current_frame} "
-                    f"conf={detection.confidence:.3f} "
-                    f"bbox={detection.bbox}"
+            # # print("=====================detection=========================")
+            # for detection in detections:
+            #     print(
+            #         f"frame={current_frame} "
+            #         f"conf={detection.confidence:.3f} "
+            #         f"bbox={detection.bbox}"
                    
+            #     )
+            # # print("=====================detection=========================")
+            # persons_in_frame = len(detections)
+            # peak_persons_detected = max(peak_persons_detected, persons_in_frame)
+
+            # """tracking multiple persons"""
+
+            # tracked = self.tracker.update(detections,frame)
+            # print("============tracker type==============",tracker_type)
+
+            # =========================================================
+            # DETECTION + TRACKING
+            # =========================================================
+
+            if tracker_type == "sam2":
+
+                # -----------------------------------------------------
+                # SAM2: YOLO is used ONLY on the first processed frame
+                # -----------------------------------------------------
+
+                if current_frame == time_range.start_frame:
+
+                    print("[SAM2] Running YOLO on first frame...")
+
+                    detections = self.detector.detect(frame)
+
+                    processed_frames += 1
+
+                    if not detections:
+                        print(
+                            "[SAM2] No persons detected "
+                            "in first frame."
+                        )
+
+                        tracked = []
+
+                    else:
+
+                        print(
+                            f"[SAM2] Initializing with "
+                            f"{len(detections)} persons..."
+                        )
+
+                        self.tracker.initialize(
+                            frame=frame,
+                            detections=detections,
+                        )
+
+                        # Initial YOLO detections become SAM2 tracks.
+                        tracked = []
+
+                        for index, detection in enumerate(
+                            detections,
+                            start=1,
+                        ):
+                            tracked.append(
+                                TrackedDetection(
+                                    bbox=detection.bbox,
+                                    confidence=detection.confidence,
+                                    class_id=detection.class_id,
+                                    track_id=index,
+                                )
+                            )
+
+                        print(
+                            f"[SAM2] Initial IDs: "
+                            f"{[track.track_id for track in tracked]}"
+                        )
+
+                else:
+
+                    # -------------------------------------------------
+                    # SAM2 propagation
+                    # NO YOLO detection after first frame
+                    # -------------------------------------------------
+
+                    tracked = self.tracker.update(frame)
+
+            else:
+
+                # =====================================================
+                # EXISTING BYTE TRACK / DEEP SORT
+                # =====================================================
+
+                detections = self.detector.detect(frame)
+
+                processed_frames += 1
+
+                elapsed = time.time() - start_time
+
+                if elapsed >= 1.0:
+                    print(
+                        f"YOLO processing FPS: "
+                        f"{processed_frames / elapsed:.2f}"
+                    )
+
+                    start_time = time.time()
+                    processed_frames = 0
+
+                for detection in detections:
+                    print(
+                        f"frame={current_frame} "
+                        f"conf={detection.confidence:.3f} "
+                        f"bbox={detection.bbox}"
+                    )
+
+                tracked = self.tracker.update(
+                    detections,
+                    frame,
                 )
-            # print("=====================detection=========================")
-            persons_in_frame = len(detections)
-            peak_persons_detected = max(peak_persons_detected, persons_in_frame)
 
-            """tracking multiple persons"""
-
-            tracked = self.tracker.update(detections,frame)
-
+            print(
+                "============tracker type==============",
+                tracker_type,
+            )
             
 
             # Save a snapshot for every NEW track ID
@@ -320,7 +450,7 @@ class VideoProcessor:
                     f"conf={track.confidence:.3f} "
                     f"bbox={track.bbox}"
                 )
-
+            
             print("===================TRACK ==========================")
 
 

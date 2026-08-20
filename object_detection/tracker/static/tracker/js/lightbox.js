@@ -25,6 +25,12 @@
             "lightbox-view-full"
         );
 
+    const loadingOverlay =
+        document.getElementById("lightbox-loading");
+
+    const loadingText =
+        document.getElementById("lightbox-loading-text");
+
     const trackPersonBtn =
         document.getElementById(
             "lightbox-track-person"
@@ -33,6 +39,11 @@
     const backPersonBtn =
         document.getElementById(
             "lightbox-back-person"
+        );
+
+    const trackGuide =
+        document.getElementById(
+            "lightbox-track-guide"
         );
 
 
@@ -76,6 +87,7 @@
     let currentTrackId = null;
     let currentReportId = null;
 
+
     let showingFullFrame = false;
 
 
@@ -85,6 +97,29 @@
         reportId: currentReportId
     };
 };
+
+    window.showLightboxVideoLoading = function (trackIds) {
+        if (loadingText) {
+            loadingText.textContent =
+                Array.isArray(trackIds) && trackIds.length > 1
+                    ? "Generating merged video…"
+                    : "Generating tracked video…";
+        }
+
+        if (loadingOverlay) {
+            loadingOverlay.style.display = "flex";
+        }
+
+        if (lightboxTitle) {
+            lightboxTitle.textContent = "Preparing Video";
+        }
+    };
+
+    window.hideLightboxVideoLoading = function () {
+        if (loadingOverlay) {
+            loadingOverlay.style.display = "none";
+        }
+    };
 
 
     // ---------------------------------------------------------
@@ -114,6 +149,8 @@
             reportId || null;
 
         currentSeparateVideo = "";
+
+        window.hideLightboxVideoLoading();
 
         showingFullFrame = false;
 
@@ -161,6 +198,13 @@
 
             backPersonBtn.style.display =
                 "none";
+        }
+
+        if (trackGuide && trackPersonBtn) {
+            trackGuide.style.display =
+                trackPersonBtn.style.display === "none"
+                    ? "block"
+                    : "none";
         }
 
 
@@ -278,6 +322,10 @@
                 "none";
         }
 
+        if (trackGuide) {
+            trackGuide.style.display = "none";
+        }
+
 
         overlayCaption.textContent =
             overlayCaption.textContent.replace(
@@ -291,7 +339,7 @@
     // Show Separate Video
     // ---------------------------------------------------------
 
-    window.showLightboxSeparateVideo = function (videoUrl) {
+    window.showLightboxSeparateVideo = function (videoUrl, trackIds) {
         if (!videoUrl) {
             return;
         }
@@ -299,6 +347,8 @@
         // Remember that we are currently showing
         // a separate video.
         currentSeparateVideo = videoUrl;
+
+        window.hideLightboxVideoLoading();
 
         if (lightboxTitle) {
             lightboxTitle.textContent =
@@ -318,9 +368,9 @@
         });
     
         overlayCaption.textContent =
-            "Track ID " +
-            currentTrackId +
-            " — Separate Video";
+            Array.isArray(trackIds) && trackIds.length > 1
+                ? "Track IDs " + trackIds.join(", ") + " — Merged Video"
+                : "Track ID " + currentTrackId + " — Separate Video";
     
         if (viewFullBtn) {
             viewFullBtn.style.display = "none";
@@ -353,6 +403,8 @@
         currentPersonImage = "";
         currentFullFrameImage = "";
         currentSeparateVideo = "";
+
+        window.hideLightboxVideoLoading();
 
         currentTrackId = null;
         currentReportId = null;
@@ -391,7 +443,6 @@
                 return;
             }
 
-
             const personCropSrc =
                 image.dataset.personCrop ||
                 image.src ||
@@ -400,7 +451,6 @@
             const fullFrameSrc =
                 image.dataset.fullFrame ||
                 "";
-
 
             const title =
                 trackCard.querySelector(
@@ -412,15 +462,12 @@
                     ".new-track-event-meta"
                 );
 
-
             let caption = "";
-
 
             if (title) {
                 caption +=
                     title.textContent;
             }
-
 
             if (meta) {
                 caption +=
@@ -428,10 +475,8 @@
                     meta.textContent;
             }
 
-
             caption +=
                 " — Person Crop";
-
 
             openLightbox(
                 image.src,
@@ -446,7 +491,6 @@
     );
 
     
-
     // ---------------------------------------------------------
     // View Full Frame
     // ---------------------------------------------------------

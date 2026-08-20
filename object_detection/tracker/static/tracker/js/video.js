@@ -20,6 +20,60 @@
     };
 
     let displayedTrackIds = new Set();
+    let isTrackSelectionEnabled = false;
+
+    function setTrackSelectionEnabled(enabled) {
+        isTrackSelectionEnabled = enabled;
+
+        document.querySelectorAll(".new-track-event").forEach(
+            function (card) {
+                card.classList.toggle("selection-disabled", !enabled);
+            }
+        );
+
+        const guide = document.getElementById("track-selection-guide");
+        if (guide) {
+            guide.classList.toggle("ready", enabled);
+            guide.textContent = enabled
+                ? "Processing is complete. Select thumbnails to track multiple IDs."
+                : "You can track a person after video processing is complete. Then select thumbnails to track multiple IDs.";
+        }
+
+        if (!enabled) {
+            document.querySelectorAll(".new-track-event.selected").forEach(
+                function (card) {
+                    card.classList.remove("selected");
+                    card.dataset.selected = "false";
+                }
+            );
+        }
+        updateSelectedPeopleUI();
+    }
+
+    function updateSelectedPeopleUI() {
+        const selectedCards = document.querySelectorAll(
+            ".new-track-event.selected"
+        );
+        const selectionInfo = document.getElementById(
+            "new-track-selection-info"
+        );
+        const selectionCount = document.getElementById(
+            "new-track-selection-count"
+        );
+        const trackSelectedPeopleBtn = document.getElementById(
+            "track-selected-people"
+        );
+
+        if (selectionCount) {
+            selectionCount.textContent = selectedCards.length;
+        }
+        if (selectionInfo) {
+            selectionInfo.style.display = selectedCards.length ? "flex" : "none";
+        }
+        if (trackSelectedPeopleBtn) {
+            trackSelectedPeopleBtn.disabled = selectedCards.length === 0;
+        }
+    }
 
 
     function formatStatus(status) {
@@ -157,9 +211,11 @@
             const card =
                 document.createElement("div");
 
-            card.className =
-                "new-track-event";
-
+            card.className = "new-track-event";
+            card.classList.toggle("selection-disabled", !isTrackSelectionEnabled);
+            card.dataset.trackId = String(event.track_id);
+            card.dataset.reportId = String(event.report_id);
+            card.dataset.selected = "false";
 
             const header =
                 document.createElement("div");
@@ -302,8 +358,130 @@
                 card.appendChild(thumbWrap);
             }
 
+            card.addEventListener(
+                "click",
+                function (event) {
+            
+                    // Do not interfere with the existing
+                    // thumbnail -> lightbox behavior.
+                    if (event.target.closest("img")) {
+                        return;
+                    }
+
+                    if (!isTrackSelectionEnabled) {
+                        return;
+                    }
+            
+                    const isSelected =
+                        card.dataset.selected === "true";
+            
+                    card.dataset.selected =
+                        isSelected ? "false" : "true";
+            
+                    card.classList.toggle(
+                        "selected",
+                        !isSelected
+                    );
+            
+                    console.log(
+                        "Track ID",
+                        card.dataset.trackId,
+                        !isSelected
+                            ? "SELECTED"
+                            : "DESELECTED"
+                    );
+                    updateSelectedPeopleUI();
+                }
+            );
 
             container.appendChild(card);
+        });
+    }
+
+    window.getSelectedTrackIdsForLightbox =
+        function (lightboxTrackId) {
+
+            const currentCard = document.querySelector(
+                '.new-track-event[data-track-id="' +
+                String(lightboxTrackId) +
+                '"]'
+            );
+
+            // Do not use other selections unless this exact thumbnail is one
+            // of them. This preserves standalone generation for unselected
+            // thumbnails.
+            if (!currentCard || !currentCard.classList.contains("selected")) {
+                return [Number(lightboxTrackId)];
+            }
+
+            return Array.from(
+                document.querySelectorAll(".new-track-event.selected")
+            )
+                .map(function (card) {
+                    return Number(card.dataset.trackId);
+                })
+                .filter(function (trackId) {
+                    return Number.isInteger(trackId);
+                })
+                .filter(function (trackId, index, trackIds) {
+                    return trackIds.indexOf(trackId) === index;
+                })
+                .sort(function (first, second) {
+                    return first - second;
+                });
+        };
+
+    function getSelectedCards() {
+        return Array.from(
+            document.querySelectorAll(".new-track-event.selected")
+        );
+    }
+
+    const trackSelectedPeopleBtn =
+        document.getElementById("track-selected-people");
+
+    if (trackSelectedPeopleBtn) {
+        trackSelectedPeopleBtn.addEventListener("click", function () {
+            const selectedCards = getSelectedCards();
+            const trackIds = selectedCards
+                .map(function (card) {
+                    return Number(card.dataset.trackId);
+                })
+                .filter(Number.isInteger)
+                .sort(function (first, second) {
+                    return first - second;
+                });
+
+            const reportIds = selectedCards
+                .map(function (card) {
+                    return card.dataset.reportId;
+                })
+                .filter(Boolean);
+
+            if (!trackIds.length || !reportIds.length) {
+                alert("Select one or more tracked people first.");
+                return;
+            }
+
+            if (new Set(reportIds).size !== 1) {
+                alert("Selected people must belong to the same report.");
+                return;
+            }
+
+            // Open the first selected thumbnail so the generated video has
+            // the same preview experience as the lightbox action.
+            const firstImage = selectedCards[0].querySelector("img");
+            if (firstImage) {
+                firstImage.click();
+            }
+
+            if (window.generateSeparateVideo) {
+                window.generateSeparateVideo(
+                    trackIds,
+                    reportIds[0],
+                    trackSelectedPeopleBtn
+                );
+            }
         });
     }
 
@@ -663,15 +841,15 @@
                     "flex";
             }
 
-
+            // The cards were cleared for the next upload, so reset both the
+            // count and the selected-people action before polling begins.
+            setTrackSelectionEnabled(false);
             updateProgressUI(
                 0,
                 0,
                 0,
                 "Starting..."
             );
-
-
             const trackIdFieldOnSubmit =
                 document.getElementById(
                     "track-id-field"
@@ -684,8 +862,6 @@
                     "field-hidden"
                 );
             }
-
-
             try {
 
                 const formData =
@@ -782,6 +958,8 @@
 
                     function onComplete(result) {
 
+                        setTrackSelectionEnabled(true);
+
                         updateProgressUI(
                             result.total_frames,
                             result.total_frames,
@@ -830,19 +1008,6 @@
 
                                 form.reset();
 
-
-                                const trackIdField =
-                                    document.getElementById(
-                                        "track-id-field"
-                                    );
-
-
-                                if (trackIdField) {
-
-                                    trackIdField.classList.remove(
-                                        "field-hidden"
-                                    );
-                                }
 
                             },
                             400
