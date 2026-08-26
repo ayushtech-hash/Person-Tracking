@@ -97,6 +97,15 @@ class IndexedPerson:
     node_id: int
 
 
+@dataclass
+class ManualMatchCandidate:
+    """A below-auto-threshold OSNet comparison awaiting user review."""
+
+    first_node_id: int
+    second_node_id: int
+    similarity: float
+
+
 class PersonSimilarityIndex:
     """Groups matching upper-body snapshots from one uploaded video.
 
@@ -104,15 +113,26 @@ class PersonSimilarityIndex:
     crop B and B already matches A, all three crops have one identity group,
     even if C does not directly meet the threshold against A.
 
-    This class is scoped to a single processing run and is intentionally kept
-    in memory for now.  Persisting its final groups is the next implementation
-    step.
+    This class is scoped to one processing run.  It also retains similarities
+    in the manual-review range so they can be persisted after final automatic
+    group resolution.
     """
 
-    def __init__(self, threshold: float = 0.80, max_matches: int = 4):
+    def __init__(
+        self,
+        threshold: float = 0.80,
+        manual_review_threshold: float = 0.70,
+        max_matches: int = 4,
+    ):
+        if manual_review_threshold >= threshold:
+            raise ValueError(
+                "manual_review_threshold must be below the automatic threshold."
+            )
         self.threshold = threshold
+        self.manual_review_threshold = manual_review_threshold
         self.max_matches = max_matches
         self._people: List[IndexedPerson] = []
+        self._manual_match_candidates: List[ManualMatchCandidate] = []
         # A small union-find structure lets a new crop merge one or more
         # previously separate groups without losing transitive relationships.
         self._parents: List[int] = []
@@ -186,6 +206,46 @@ class PersonSimilarityIndex:
             for root, members in sorted(groups.items())
         ]
 
+    def get_manual_grouping_suggestions(self) -> List[Dict]:
+        """Return one best manual-review suggestion for each final group pair.
+
+        A candidate is discarded when a later automatic match has already
+        connected its two groups.  That prevents prompting the user to merge
+        people who are already automatically grouped.
+        """
+        self._sync_group_metadata()
+        best_candidates: Dict[tuple, ManualMatchCandidate] = {}
+
+        for candidate in self._manual_match_candidates:
+            first_root = self._find(candidate.first_node_id)
+            second_root = self._find(candidate.second_node_id)
+            if first_root == second_root:
+                continue
+
+            key = tuple(sorted((first_root, second_root)))
+            previous = best_candidates.get(key)
+            if previous is None or candidate.similarity > previous.similarity:
+                best_candidates[key] = candidate
+
+        suggestions = []
+        for (first_root, second_root), candidate in sorted(best_candidates.items()):
+            first_person = self._people[candidate.first_node_id]
+            second_person = self._people[candidate.second_node_id]
+            suggestions.append(
+                {
+                    "first_identity_group_id": first_root + 1,
+                    "second_identity_group_id": second_root + 1,
+                    "first_track_id": first_person.event.get("track_id"),
+                    "first_frame": first_person.event.get("frame"),
+                    "first_image_url": first_person.event.get("image_url", ""),
+                    "second_track_id": second_person.event.get("track_id"),
+                    "second_frame": second_person.event.get("frame"),
+                    "second_image_url": second_person.event.get("image_url", ""),
+                    "similarity": round(candidate.similarity, 4),
+                }
+            )
+        return suggestions
+
     def add_and_find_similar(self, image_bgr: np.ndarray, event: Dict) -> List[Dict]:
         """Find prior matching snapshots, then add this snapshot to the index."""
         try:
@@ -211,6 +271,7 @@ class PersonSimilarityIndex:
 
         matches = []
         matching_node_ids = []
+        manual_match_node_scores = []
         for person in self._people:
             score = float(np.dot(embedding, person.embedding))
             logger.info(
@@ -237,12 +298,32 @@ class PersonSimilarityIndex:
                     "similarity": round(score, 4),
                 })
                 matching_node_ids.append(person.node_id)
+            elif score >= self.manual_review_threshold:
+                logger.info(
+                    "[ReID] MANUAL REVIEW CANDIDATE: track_id=%s and "
+                    "track_id=%s (cosine_similarity=%.4f, range=%.2f-%.2f)",
+                    event.get("track_id"),
+                    person.event.get("track_id"),
+                    score,
+                    self.manual_review_threshold,
+                    self.threshold,
+                )
+                manual_match_node_scores.append((person.node_id, score))
 
         node_id = len(self._people)
         self._parents.append(node_id)
         self._people.append(
             IndexedPerson(embedding=embedding, event=event, node_id=node_id)
         )
+
+        for matching_node_id, score in manual_match_node_scores:
+            self._manual_match_candidates.append(
+                ManualMatchCandidate(
+                    first_node_id=matching_node_id,
+                    second_node_id=node_id,
+                    similarity=score,
+                )
+            )
 
         # A match to any prior crop assigns this crop to that identity.  If it
         # matches two groups, union them: this is what supports A <-> B <-> C

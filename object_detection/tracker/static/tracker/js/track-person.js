@@ -89,6 +89,7 @@
     }
 
     window.clearMainTrackedVideoGroups = clearMainTrackedVideoGroups;
+    window.showTrackedVideoGroupsOnPage = showTrackedVideoGroupsOnPage;
 
     function showTrackedVideoGroupsOnPage(identityGroups) {
         // The generated selected-person video stays in the lightbox.  Do not

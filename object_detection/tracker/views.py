@@ -7,7 +7,9 @@ import time
 import cv2
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
+from django.db.models import Q
+from django.utils import timezone
 from django.http import JsonResponse
 from django.shortcuts import render
 from .forms import ImageUploadForm, VideoUploadForm
@@ -15,7 +17,13 @@ from .services.detection.image_processor import ImageProcessor
 from .services.processor import VideoProcessor
 from .services.reporting.progress import progress
 from .services.reporting.report_generator import ReportGenerator
-from .models import TrackingReport,PersonTrackStats,TrackFrameEvent
+from .models import (
+    ManualGroupingSuggestion,
+    ManualIdentityGroupMerge,
+    PersonTrackStats,
+    TrackFrameEvent,
+    TrackingReport,
+)
 
 from .services.detection.image_processor import ImageProcessor
 from .services.processor import VideoProcessor
@@ -383,6 +391,7 @@ def _reset_progress():
     progress["message"] = None
     progress["error"] = None
     progress["new_track_events"] = []
+    progress["manual_grouping_suggestions"] = []
 
 
 def _run_processing(
@@ -471,6 +480,11 @@ def _run_processing(
             # Resolve groups only after processing ends: a later upper-half
             # crop may have merged identities that initially looked separate.
             identity_groups=similarity_index.get_groups(),
+            # Pairs in the 70%-to-auto-threshold range are persisted for the
+            # manual grouping review UI added in the following step.
+            manual_grouping_suggestions=(
+                similarity_index.get_manual_grouping_suggestions()
+            ),
             # Reuse the report that received every active-track frame while
             # processing; creating a second report loses the video timeline.
             tracking_report=TrackingReport.objects.get(id=report_id),
@@ -483,6 +497,9 @@ def _run_processing(
             progress["report_id"] = tracking_report.id
             progress["report"] = ReportGenerator.serialize_tracking_report(
                 tracking_report
+            )
+            progress["manual_grouping_suggestions"] = (
+                _serialize_manual_grouping_suggestions(tracking_report)
             )
             progress["message"] = None
         else:
@@ -655,11 +672,34 @@ def get_progress(request):
     return JsonResponse(progress)
 
 
+def _serialize_manual_grouping_suggestions(report):
+    """Expose unresolved review-range OSNet pairs after processing completes."""
+    return list(
+        report.manual_grouping_suggestions.filter(
+            is_resolved=False,
+            status=ManualGroupingSuggestion.Status.PENDING,
+        ).values(
+            "id",
+            "report_id",
+            "first_group__group_key",
+            "second_group__group_key",
+            "first_track_id",
+            "first_frame_number",
+            "first_image_url",
+            "second_track_id",
+            "second_frame_number",
+            "second_image_url",
+            "similarity",
+        )
+    )
+
+
 def _serialize_identity_groups_for_video(report, identity_group_ids):
     """Return upper-half snapshot crops for the groups used in one video."""
     groups = list(
         report.identity_groups.filter(
             group_key__in=identity_group_ids,
+            is_active=True,
         ).prefetch_related("tracks__frame_events")
     )
 
@@ -690,6 +730,263 @@ def _serialize_identity_groups_for_video(report, identity_group_ids):
         )
 
     return serialized_groups
+
+
+def _serialize_representative_event(report, group):
+    """Return the persisted snapshot needed to restore one UI thumbnail."""
+    event = (
+        TrackFrameEvent.objects.filter(
+            track__report=report,
+            track__track_id=group.representative_track_id,
+            thumbnail_url__gt="",
+        )
+        .order_by("frame_number", "id")
+        .first()
+    )
+    if not event:
+        return None
+
+    return {
+        "track_id": event.track.track_id,
+        "report_id": report.id,
+        "frame": event.frame_number,
+        "time_sec": round(event.timestamp, 2),
+        "image_url": event.thumbnail_url,
+        "person_crop_url": event.cropped_image_url,
+        "full_frame_url": event.full_frame_url,
+        "identity_group_id": group.group_key,
+        "is_identity_representative": True,
+        "similar_persons": [],
+    }
+
+
+def dismiss_manual_grouping_suggestion(request):
+    """Hide an irrelevant suggestion without changing either identity group."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"success": False, "error": "Method not allowed."},
+            status=405,
+        )
+
+    try:
+        report_id = int(request.POST.get("report_id"))
+        suggestion_id = int(request.POST.get("suggestion_id"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "error": "Invalid report or suggestion."},
+            status=400,
+        )
+
+    updated = ManualGroupingSuggestion.objects.filter(
+        id=suggestion_id,
+        report_id=report_id,
+        is_resolved=False,
+        status=ManualGroupingSuggestion.Status.PENDING,
+    ).update(
+        status=ManualGroupingSuggestion.Status.DISMISSED,
+        is_resolved=True,
+    )
+    if not updated:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "This grouping suggestion is no longer available.",
+            },
+            status=404,
+        )
+
+    report = TrackingReport.objects.get(id=report_id)
+    return JsonResponse(
+        {
+            "success": True,
+            "remaining_suggestions": _serialize_manual_grouping_suggestions(report),
+        }
+    )
+
+
+def merge_manual_identity_groups(request):
+    """Merge the two groups shown by one confirmed manual suggestion."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"success": False, "error": "Method not allowed."},
+            status=405,
+        )
+
+    try:
+        report_id = int(request.POST.get("report_id"))
+        suggestion_id = int(request.POST.get("suggestion_id"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "error": "Invalid report or suggestion."},
+            status=400,
+        )
+
+    try:
+        with transaction.atomic():
+            suggestion = (
+                ManualGroupingSuggestion.objects.select_for_update()
+                .select_related("report", "first_group", "second_group")
+                .get(
+                    id=suggestion_id,
+                    report_id=report_id,
+                    is_resolved=False,
+                    status=ManualGroupingSuggestion.Status.PENDING,
+                )
+            )
+            first_group = suggestion.first_group
+            second_group = suggestion.second_group
+
+            # Group keys follow initial encounter order, so the lower key has
+            # the earliest representative and remains visible after merging.
+            primary_group, duplicate_group = sorted(
+                (first_group, second_group),
+                key=lambda group: group.group_key,
+            )
+
+            moved_track_ids = list(PersonTrackStats.objects.filter(
+                report_id=report_id,
+                identity_group=duplicate_group,
+            ).values_list("track_id", flat=True))
+            affected_suggestions = list(
+                ManualGroupingSuggestion.objects.filter(
+                    report_id=report_id,
+                    status=ManualGroupingSuggestion.Status.PENDING,
+                )
+                .filter(
+                    Q(first_group__in=[primary_group, duplicate_group])
+                    | Q(second_group__in=[primary_group, duplicate_group])
+                )
+                .values_list("id", flat=True)
+            )
+            merge_history = ManualIdentityGroupMerge.objects.create(
+                report_id=report_id,
+                source_suggestion=suggestion,
+                primary_group=primary_group,
+                duplicate_group=duplicate_group,
+                moved_track_ids=json.dumps(moved_track_ids),
+                resolved_suggestion_ids=json.dumps(affected_suggestions),
+            )
+            PersonTrackStats.objects.filter(
+                report_id=report_id,
+                track_id__in=moved_track_ids,
+            ).update(identity_group=primary_group)
+
+            # Keep the original group for undo, but remove it from all active
+            # behavior and from the representative-thumbnail list.
+            duplicate_group.is_active = False
+            duplicate_group.merged_into = primary_group
+            duplicate_group.save(update_fields=["is_active", "merged_into"])
+
+            # All review candidates involving either group are no longer
+            # actionable once the user confirms this manual merge.
+            ManualGroupingSuggestion.objects.filter(
+                id__in=affected_suggestions,
+            ).update(
+                is_resolved=True,
+                status=ManualGroupingSuggestion.Status.GROUPED,
+            )
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "report_id": report_id,
+                    "identity_group_id": primary_group.group_key,
+                    "duplicate_identity_group_id": duplicate_group.group_key,
+                    "representative_track_id": primary_group.representative_track_id,
+                    "manual_merge_id": merge_history.id,
+                    "identity_groups": _serialize_identity_groups_for_video(
+                        suggestion.report,
+                        [primary_group.group_key],
+                    ),
+                    "remaining_suggestions": _serialize_manual_grouping_suggestions(
+                        suggestion.report
+                    ),
+                }
+            )
+
+    except ManualGroupingSuggestion.DoesNotExist:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "This grouping suggestion is no longer available.",
+            },
+            status=404,
+        )
+
+
+def undo_manual_identity_group_merge(request):
+    """Reverse one confirmed manual merge without touching OSNet groups."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"success": False, "error": "Method not allowed."}, status=405
+        )
+
+    try:
+        report_id = int(request.POST.get("report_id"))
+        merge_id = int(request.POST.get("manual_merge_id"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "error": "Invalid report or manual merge."},
+            status=400,
+        )
+
+    try:
+        with transaction.atomic():
+            merge = (
+                ManualIdentityGroupMerge.objects.select_for_update()
+                .select_related("report", "primary_group", "duplicate_group")
+                .get(id=merge_id, report_id=report_id, is_undone=False)
+            )
+
+            duplicate_group = merge.duplicate_group
+            primary_group = merge.primary_group
+            moved_track_ids = json.loads(merge.moved_track_ids)
+            resolved_suggestion_ids = json.loads(merge.resolved_suggestion_ids)
+            if duplicate_group.merged_into_id != primary_group.id:
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "This merge can no longer be undone safely.",
+                    },
+                    status=409,
+                )
+
+            PersonTrackStats.objects.filter(
+                report_id=report_id,
+                track_id__in=moved_track_ids,
+                identity_group=primary_group,
+            ).update(identity_group=duplicate_group)
+            duplicate_group.is_active = True
+            duplicate_group.merged_into = None
+            duplicate_group.save(update_fields=["is_active", "merged_into"])
+
+            ManualGroupingSuggestion.objects.filter(
+                id__in=resolved_suggestion_ids,
+                status=ManualGroupingSuggestion.Status.GROUPED,
+            ).update(
+                is_resolved=False,
+                status=ManualGroupingSuggestion.Status.PENDING,
+            )
+            merge.is_undone = True
+            merge.undone_at = timezone.now()
+            merge.save(update_fields=["is_undone", "undone_at"])
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "restored_event": _serialize_representative_event(
+                        merge.report, duplicate_group
+                    ),
+                    "remaining_suggestions": _serialize_manual_grouping_suggestions(
+                        merge.report
+                    ),
+                }
+            )
+    except ManualIdentityGroupMerge.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "error": "This manual merge is no longer available."},
+            status=404,
+        )
 
 
 def generate_separate_video(request):
@@ -745,6 +1042,7 @@ def generate_separate_video(request):
             known_group_ids = set(
                 report.identity_groups.filter(
                     group_key__in=identity_group_ids,
+                    is_active=True,
                 ).values_list("group_key", flat=True)
             )
             missing_group_ids = set(identity_group_ids) - known_group_ids

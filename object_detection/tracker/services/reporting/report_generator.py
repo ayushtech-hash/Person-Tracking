@@ -1,6 +1,7 @@
 from tracker.services.tracking.presence_tracker import PresenceReport
 from typing import Dict, List, Optional, Union
 from tracker.models import (
+    ManualGroupingSuggestion,
     PersonIdentityGroup,
     PersonTrackStats,
     TrackingReport,
@@ -87,11 +88,13 @@ class ReportGenerator:
         selected_track_id: Optional[int] = None,
         frame_events: Optional[List[Dict]] = None,
         identity_groups: Optional[List[Dict]] = None,
+        manual_grouping_suggestions: Optional[List[Dict]] = None,
         tracking_report: Optional[TrackingReport] = None,
     ) -> TrackingReport:
 
         frame_events = frame_events or []
         identity_groups = identity_groups or []
+        manual_grouping_suggestions = manual_grouping_suggestions or []
 
         # =========================================================
         # 1. Create or finalize TrackingReport + PersonTrackStats
@@ -244,7 +247,54 @@ class ReportGenerator:
                 )
 
         # =========================================================
-        # 4. Create TrackFrameEvent records
+        # 4. Persist below-auto-threshold suggestions for manual review
+        # =========================================================
+
+        persisted_groups_by_key = {
+            group.group_key: group
+            for group in tracking_report.identity_groups.all()
+        }
+        for suggestion in manual_grouping_suggestions:
+            first_group = persisted_groups_by_key.get(
+                suggestion.get("first_identity_group_id")
+            )
+            second_group = persisted_groups_by_key.get(
+                suggestion.get("second_identity_group_id")
+            )
+            if first_group is None or second_group is None:
+                continue
+
+            # Group keys are normalized by the similarity index.  Keep the
+            # same ordering here so a suggestion pair is never duplicated.
+            if first_group.group_key > second_group.group_key:
+                first_group, second_group = second_group, first_group
+                first_prefix, second_prefix = "second", "first"
+            else:
+                first_prefix, second_prefix = "first", "second"
+
+            ManualGroupingSuggestion.objects.update_or_create(
+                report=tracking_report,
+                first_group=first_group,
+                second_group=second_group,
+                defaults={
+                    "first_track_id": int(suggestion[f"{first_prefix}_track_id"]),
+                    "first_frame_number": int(suggestion[f"{first_prefix}_frame"]),
+                    "first_image_url": suggestion.get(
+                        f"{first_prefix}_image_url", ""
+                    ),
+                    "second_track_id": int(suggestion[f"{second_prefix}_track_id"]),
+                    "second_frame_number": int(suggestion[f"{second_prefix}_frame"]),
+                    "second_image_url": suggestion.get(
+                        f"{second_prefix}_image_url", ""
+                    ),
+                    "similarity": float(suggestion["similarity"]),
+                    "status": ManualGroupingSuggestion.Status.PENDING,
+                    "is_resolved": False,
+                },
+            )
+
+        # =========================================================
+        # 5. Create TrackFrameEvent records
         # =========================================================
 
         for event in frame_events:
@@ -282,10 +332,6 @@ class ReportGenerator:
             if created:
                 frame_event.full_frame_url = event.get("full_frame_url", "")
                 frame_event.save(update_fields=["full_frame_url"])
-
-        # =========================================================
-        # 5. Save all frame events at once
-        # =========================================================
 
         return tracking_report
 
