@@ -23,6 +23,7 @@ from .services.video.seperate_video import SeparateVideoGenerator
 from .services.reporting.progress import progress
 from .services.reporting.report_generator import ReportGenerator
 from .services.video.video_paths import get_next_video_version, get_video_directories
+from .services.reidentification import PersonSimilarityIndex
 
 
 _processing_lock = threading.Lock()
@@ -50,6 +51,7 @@ def update_track_event(
     fps,
     video_version,
     report_id,
+    similarity_index=None,
 ):
     """
     Save a new-track event with three images:
@@ -70,6 +72,7 @@ def update_track_event(
     video_dirs = get_video_directories(video_version)
     event_dir = video_dirs["track_events"]
     crop_dir = video_dirs["track_crops"]
+    upper_half_crop_dir = video_dirs["upper_half_cropped"]
 
     # ---------------------------------------------------------
     # Bounding box
@@ -158,11 +161,11 @@ def update_track_event(
     # ---------------------------------------------------------
 
     # Calculate the midpoint of the bounding box.
-    midpoint_y = y1 + ((y2 - y1) // 4)
+    midpoint_y = y1 + ((y2 - y1) // 2)
 
     # Crop only the upper half.
     thumbnail = original_frame[
-        y1:y2,
+        y1:midpoint_y,
         x1:x2
     ].copy()
 
@@ -191,7 +194,7 @@ def update_track_event(
     )
 
     thumbnail_file_path = os.path.join(
-        crop_dir,
+        upper_half_crop_dir,
         thumbnail_filename
     )
 
@@ -227,7 +230,7 @@ def update_track_event(
 
     thumbnail_url = (
     f"{media_url}/videos/"
-    f"{video_version}/track_crops/"
+    f"{video_version}/upper_half_cropped/"
     f"{thumbnail_filename}"
     )
 
@@ -260,13 +263,21 @@ def update_track_event(
 
         # Original full frame
         "full_frame_url": full_frame_url,
-    
+        "similar_persons": [],
     }
+
+    # Use the same upper-half crop shown in the UI for ReID. Full person crops
+    # are still saved separately for the lightbox and existing workflows.
+    if similarity_index is not None:
+        event["similar_persons"] = similarity_index.add_and_find_similar(
+            thumbnail,
+            event,
+        )
+
     if "new_track_events" not in progress:
         progress["new_track_events"] = []
 
     progress["new_track_events"].append(event)
-
 
 
 def update_track_frame(
@@ -276,8 +287,7 @@ def update_track_frame(
     fps,
     report_id,
     video_version,
-
-):
+    ):
     """
     Save the processed full frame once and create a database
     event for every track visible in that frame.
@@ -361,8 +371,6 @@ def update_track_frame(
         )
 
 
-
-
 def _reset_progress():
     progress["current_frame"] = 0
     progress["total_frames"] = 0
@@ -397,6 +405,14 @@ def _run_processing(
 
     try:
         processor = VideoProcessor()
+        # Keep matches scoped to this upload, never across unrelated videos.
+        similarity_index = PersonSimilarityIndex()
+
+        def track_event_handler(**event_data):
+            update_track_event(
+                **event_data,
+                similarity_index=similarity_index,
+            )
 
         def track_frame_handler(
             frame,
@@ -420,7 +436,7 @@ def _run_processing(
             end_time=end_time,
             selected_track_id=track_id,
             progress_callback=update_progress,
-            track_event_callback=update_track_event,
+            track_event_callback=track_event_handler,
             track_frame_callback=track_frame_handler,
             video_version=video_version,
             report_id=report_id,
@@ -452,7 +468,18 @@ def _run_processing(
             input_video_url=input_video_url,
             selected_track_id=track_id,
             frame_events=progress.get("new_track_events",[]),
+            # Resolve groups only after processing ends: a later upper-half
+            # crop may have merged identities that initially looked separate.
+            identity_groups=similarity_index.get_groups(),
+            # Reuse the report that received every active-track frame while
+            # processing; creating a second report loses the video timeline.
+            tracking_report=TrackingReport.objects.get(id=report_id),
         )
+            # Event cards are rendered while processing uses a temporary
+            # report.  Replace that ID once the final report and its identity
+            # groups have been persisted, before selection becomes available.
+            for event in progress.get("new_track_events", []):
+                event["report_id"] = tracking_report.id
             progress["report_id"] = tracking_report.id
             progress["report"] = ReportGenerator.serialize_tracking_report(
                 tracking_report
@@ -627,6 +654,44 @@ def detect_image(request):
 def get_progress(request):
     return JsonResponse(progress)
 
+
+def _serialize_identity_groups_for_video(report, identity_group_ids):
+    """Return upper-half snapshot crops for the groups used in one video."""
+    groups = list(
+        report.identity_groups.filter(
+            group_key__in=identity_group_ids,
+        ).prefetch_related("tracks__frame_events")
+    )
+
+    serialized_groups = []
+    for group in groups:
+        crops = []
+        for track in group.tracks.all():
+            # A thumbnail exists for the new-track snapshot that OSNet used
+            # for matching. Per-frame events deliberately have no thumbnail.
+            for event in track.frame_events.all():
+                if not event.thumbnail_url:
+                    continue
+                crops.append(
+                    {
+                        "track_id": track.track_id,
+                        "frame": event.frame_number,
+                        "image_url": event.thumbnail_url,
+                    }
+                )
+
+        crops.sort(key=lambda crop: (crop["frame"], crop["track_id"]))
+        serialized_groups.append(
+            {
+                "identity_group_id": group.group_key,
+                "representative_track_id": group.representative_track_id,
+                "crops": crops,
+            }
+        )
+
+    return serialized_groups
+
+
 def generate_separate_video(request):
     if request.method != "POST":
         return JsonResponse(
@@ -639,16 +704,28 @@ def generate_separate_video(request):
 
     try:
         report_id = int(request.POST.get("report_id"))
+        identity_group_ids_payload = request.POST.get("identity_group_ids")
         track_ids_payload = request.POST.get("track_ids")
 
-        if track_ids_payload:
+        if identity_group_ids_payload:
+            identity_group_ids = sorted({
+                int(group_id)
+                for group_id in json.loads(identity_group_ids_payload)
+            })
+            if not identity_group_ids:
+                raise ValueError
+            track_id = None
+            track_ids = None
+        elif track_ids_payload:
             track_ids = sorted({int(track_id) for track_id in json.loads(track_ids_payload)})
             if len(track_ids) < 2:
                 raise ValueError
             track_id = None
+            identity_group_ids = None
         else:
             track_id = int(request.POST.get("track_id"))
             track_ids = None
+            identity_group_ids = None
 
     except (TypeError, ValueError, json.JSONDecodeError):
         return JsonResponse(
@@ -663,6 +740,51 @@ def generate_separate_video(request):
         report = TrackingReport.objects.get(
             id=report_id
         )
+
+        if identity_group_ids:
+            known_group_ids = set(
+                report.identity_groups.filter(
+                    group_key__in=identity_group_ids,
+                ).values_list("group_key", flat=True)
+            )
+            missing_group_ids = set(identity_group_ids) - known_group_ids
+            if missing_group_ids:
+                missing_ids = ", ".join(
+                    str(group_id) for group_id in sorted(missing_group_ids)
+                )
+                raise ValueError(f"Identity group(s) not found: {missing_ids}.")
+
+            # Expand each visible representative group into every internal
+            # tracker ID that OSNet attached to it.
+            resolved_track_ids = sorted(set(
+                PersonTrackStats.objects.filter(
+                    report_id=report_id,
+                    identity_group__group_key__in=identity_group_ids,
+                ).values_list("track_id", flat=True)
+            ))
+            if not resolved_track_ids:
+                raise ValueError("No tracks found for the selected identity group(s).")
+
+            parts = report.output_video.strip("/").split("/")
+            video_version = parts[2]
+            result = SeparateVideoGenerator.generate_merged(
+                report_id=report_id,
+                track_ids=resolved_track_ids,
+                video_version=video_version,
+            )
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    **result,
+                    "identity_group_ids": identity_group_ids,
+                    "identity_groups": _serialize_identity_groups_for_video(
+                        report,
+                        identity_group_ids,
+                    ),
+                    "source": result.get("source", "generated"),
+                }
+            )
 
         if track_ids:
             print(

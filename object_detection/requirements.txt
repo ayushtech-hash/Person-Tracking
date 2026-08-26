@@ -5,3 +5,7 @@ numpy
 tqdm
 ffmpeg-python
 django
+torch
+torchvision
+torchreid
+gdown

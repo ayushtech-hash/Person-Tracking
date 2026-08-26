@@ -196,23 +196,27 @@ class SeparateVideoGenerator:
 
     @staticmethod
     def generate_merged(report_id, track_ids, video_version, fps=25.0):
-        """Generate one video by concatenating each track's frames in ID order."""
+        """Generate one video from tracks, globally ordered by video frame."""
         track_ids = sorted({int(track_id) for track_id in track_ids})
 
-        if len(track_ids) < 2:
-            raise ValueError("At least two track IDs are required for a merged video.")
+        if not track_ids:
+            raise ValueError("At least one track ID is required.")
 
-        events_by_track = []
-        for track_id in track_ids:
-            frame_events = list(
-                TrackFrameEvent.objects.filter(
-                    track__report_id=report_id,
-                    track__track_id=track_id,
-                ).order_by("frame_number")
+        # This must be one combined query, rather than an outer loop over
+        # track IDs: one selected identity group can contain many tracker IDs,
+        # and several selected groups must be interleaved in real video order.
+        frame_events = list(
+            TrackFrameEvent.objects.filter(
+                track__report_id=report_id,
+                track__track_id__in=track_ids,
+            ).select_related("track").order_by(
+                "frame_number",
+                "track__track_id",
+                "id",
             )
-            if not frame_events:
-                raise ValueError(f"No frames found for Track ID {track_id}.")
-            events_by_track.append((track_id, frame_events))
+        )
+        if not frame_events:
+            raise ValueError("No frames were found for the selected tracks.")
 
         output_dir = (
             Path(settings.MEDIA_ROOT)
@@ -242,13 +246,10 @@ class SeparateVideoGenerator:
             }
 
         first_frame = None
-        for _, frame_events in events_by_track:
-            for event in frame_events:
-                first_frame = cv2.imread(
-                    str(SeparateVideoGenerator._get_frame_path(event.full_frame_url))
-                )
-                if first_frame is not None:
-                    break
+        for event in frame_events:
+            first_frame = cv2.imread(
+                str(SeparateVideoGenerator._get_frame_path(event.full_frame_url))
+            )
             if first_frame is not None:
                 break
 
@@ -262,26 +263,20 @@ class SeparateVideoGenerator:
         frames_written = 0
 
         try:
-            # Outer loop deliberately preserves the required sequence:
-            # lowest track ID first, then ascending frame number for that ID.
-            for track_id, frame_events in events_by_track:
-                print(
-                    f"[MERGED VIDEO] Extracting frames for track_id={track_id}"
+            for event in frame_events:
+                frame = cv2.imread(
+                    str(SeparateVideoGenerator._get_frame_path(event.full_frame_url))
                 )
-                for event in frame_events:
-                    frame = cv2.imread(
-                        str(SeparateVideoGenerator._get_frame_path(event.full_frame_url))
-                    )
-                    if frame is None:
-                        continue
-                    if frame.shape[1] != width or frame.shape[0] != height:
-                        frame = cv2.resize(frame, (width, height))
-                    writer.write(frame)
-                    frames_written += 1
-                    print(
-                        f"[MERGED VIDEO] track_id={track_id} "
-                        f"frame_number={event.frame_number} written"
-                    )
+                if frame is None:
+                    continue
+                if frame.shape[1] != width or frame.shape[0] != height:
+                    frame = cv2.resize(frame, (width, height))
+                writer.write(frame)
+                frames_written += 1
+                print(
+                    f"[MERGED VIDEO] track_id={event.track.track_id} "
+                    f"frame_number={event.frame_number} written"
+                )
         finally:
             writer.release()
 

@@ -705,6 +705,51 @@
             flex-shrink:0;
         }
 
+        #similar-person-matches {
+            display:grid;
+            grid-template-columns:repeat(auto-fill, minmax(190px, 1fr));
+            gap:10px;
+            margin-top:16px;
+        }
+
+        .similar-person-match {
+            padding:10px;
+            border:1px solid #cfd7ff;
+            border-radius:10px;
+            background:#f6f7ff;
+        }
+
+        .similar-person-match-title {
+            margin-bottom:8px;
+            font-size:12px;
+            font-weight:700;
+        }
+
+        .similar-person-match-title span {
+            color:var(--primary);
+        }
+
+        .similar-person-images {
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:6px;
+        }
+
+        .similar-person-images img {
+            width:100%;
+            aspect-ratio:1 / 1;
+            object-fit:contain;
+            border:1px solid var(--border);
+            border-radius:7px;
+            background:#fff;
+        }
+
+        .similar-person-match-meta {
+            margin-top:7px;
+            color:var(--text-muted);
+            font-size:11px;
+        }
+
         @media (min-width:1600px){
             #new-track-events {
                 grid-template-columns:repeat(4, 1fr);
@@ -907,6 +952,68 @@
 
         #lightbox-actions #lightbox-back-person {
             background:rgba(255,255,255,0.82);
+        }
+
+        /* Identity groups included in the generated tracked video. */
+        #tracked-video-groups {
+            max-height:220px;
+            overflow:auto;
+            padding:14px 18px;
+            border-top:1px solid var(--border);
+            background:#fafbff;
+        }
+
+        #tracked-video-groups h3 {
+            margin:0 0 10px;
+            color:var(--text);
+            font-size:13px;
+        }
+
+        #tracked-video-group-list {
+            display:grid;
+            gap:10px;
+        }
+
+        .tracked-video-group {
+            padding:10px;
+            border:1px solid var(--border);
+            border-radius:9px;
+            background:#fff;
+        }
+
+        .tracked-video-group h4 {
+            margin:0 0 8px;
+            color:var(--text-muted);
+            font-size:12px;
+        }
+
+        .tracked-video-group-crops {
+            display:flex;
+            gap:8px;
+            overflow-x:auto;
+        }
+
+        .tracked-video-group-crops figure {
+            width:88px;
+            flex:0 0 88px;
+            margin:0;
+        }
+
+        .tracked-video-group-crops img {
+            display:block;
+            width:88px;
+            height:88px;
+            object-fit:contain;
+            border:1px solid var(--border);
+            border-radius:7px;
+            background:#f7f8fc;
+        }
+
+        .tracked-video-group-crops figcaption {
+            margin-top:4px;
+            color:var(--text-muted);
+            font-size:10px;
+            line-height:1.25;
         }
 
         #lightbox-close {
@@ -1154,6 +1261,14 @@
     </video>
     {% endif %}
     </div>
+    <section
+        id="tracked-video-groups-main"
+        aria-label="OSNet identity groups included in the tracked video"
+        style="display:none;"
+    >
+        <h3>Matched upper-half crops</h3>
+        <div id="tracked-video-group-list-main"></div>
+    </section>
 </div>
 </div>
 
@@ -1205,6 +1320,13 @@
 </div>
 
 <div class="split-right">
+<div id="similar-person-section" class="card result-card">
+    <h2>Similar Person Matches</h2>
+    <p style="color:var(--text-muted); font-size:13px; margin:0;">
+        OSNet suggestions for new tracking IDs that may be the same person.
+    </p>
+    <div id="similar-person-matches"></div>
+</div>
 <div class="card result-card">
 <h2>Tracking Result</h2>
 <div id="results-section">
@@ -1369,6 +1491,15 @@
             </div>
         </div>
 
+        <section
+            id="tracked-video-groups"
+            aria-label="OSNet identity groups included in this video"
+            style="display:none;"
+        >
+            <h3>Matched upper-half crops</h3>
+            <div id="tracked-video-group-list"></div>
+        </section>
+
         <!-- Actions -->
         <div id="lightbox-actions">
 
@@ -1459,7 +1590,7 @@
 
 <script src="{% static 'tracker/js/mode-toggle.js' %}"></script>
 <script src="{% static 'tracker/js/image.js' %}"></script>
-<script src="{% static 'tracker/js/video.js' %}"></script>
+<script src="{% static 'tracker/js/video.js' %}?v=reid-live-matches-1"></script>
 <script src="{% static 'tracker/js/lightbox.js' %}"></script>
 <script src="{% static 'tracker/js/track-person.js' %}"></script>
 

@@ -198,7 +198,6 @@ class VideoProcessor:
             hours = 00
             minutes = 00
             seconds = 00
-            # start_time = f"{hours:02}:{minutes:02}:{seconds:02}"
             start_time = f"{hours}:{minutes}:{seconds}"
 
 
@@ -245,35 +244,6 @@ class VideoProcessor:
                 break
 
             """detecting multiple persons"""
-
-            # detections = self.detector.detect(frame)
-
-            # processed_frames += 1
-            
-            # elapsed = time.time() - start_time
-
-            # if elapsed >= 1.0:
-            #     print(f"YOLO processing FPS: {processed_frames / elapsed:.2f}")
-            #     start_time = time.time()
-            #     processed_frames = 0
-
-
-            # # print("=====================detection=========================")
-            # for detection in detections:
-            #     print(
-            #         f"frame={current_frame} "
-            #         f"conf={detection.confidence:.3f} "
-            #         f"bbox={detection.bbox}"
-                   
-            #     )
-            # # print("=====================detection=========================")
-            # persons_in_frame = len(detections)
-            # peak_persons_detected = max(peak_persons_detected, persons_in_frame)
-
-            # """tracking multiple persons"""
-
-            # tracked = self.tracker.update(detections,frame)
-            # print("============tracker type==============",tracker_type)
 
             # =========================================================
             # DETECTION + TRACKING
@@ -364,12 +334,15 @@ class VideoProcessor:
                     start_time = time.time()
                     processed_frames = 0
 
-                for detection in detections:
-                    print(
-                        f"frame={current_frame} "
-                        f"conf={detection.confidence:.3f} "
-                        f"bbox={detection.bbox}"
-                    )
+                # for detection in detections
+                    # print(
+                        # f"frame={current_frame} "
+                        # f"conf={detection.confidence:.3f} "
+                        # f"bbox={detection.bbox}"
+                    # )
+                persons_in_frame = len(detections)
+                peak_persons_detected = max(peak_persons_detected, persons_in_frame)
+
 
                 tracked = self.tracker.update(
                     detections,
@@ -441,17 +414,17 @@ class VideoProcessor:
                         )
 
            
-            print("===================TRACK ==========================")
+            # print("===================TRACK ==========================")
 
-            for track in tracked:
-                print(
-                    f"frame={current_frame} "
-                    f"id={track.track_id} "
-                    f"conf={track.confidence:.3f} "
-                    f"bbox={track.bbox}"
-                )
+            # for track in tracked:
+                # print(
+                    # f"frame={current_frame} "
+                    # f"id={track.track_id} "
+                    # f"conf={track.confidence:.3f} "
+                    # f"bbox={track.bbox}"
+                # )
             
-            print("===================TRACK ==========================")
+            # print("===================TRACK ==========================")
 
 
             self.presence_tracker.update(tracked,current_frame,)
@@ -462,11 +435,13 @@ class VideoProcessor:
             # ---------------------------------------------------------
             # Save full frame for every active track
             # ---------------------------------------------------------
-            print(
-                f"DEBUG: frame={current_frame}, "
-                f"tracked={len(tracked)}, "
-                f"callback={track_frame_callback is not None}"
-            )
+            
+            # print(
+                # f"DEBUG: frame={current_frame}, "
+                # f"tracked={len(tracked)}, "
+                # f"callback={track_frame_callback is not None}"
+            # )
+
             if track_frame_callback and tracked:
 
                 track_frame_callback(

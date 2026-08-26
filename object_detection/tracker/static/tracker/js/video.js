@@ -20,6 +20,7 @@
     };
 
     let displayedTrackIds = new Set();
+    let displayedSimilarityPairs = new Set();
     let isTrackSelectionEnabled = false;
 
     function setTrackSelectionEnabled(enabled) {
@@ -186,25 +187,56 @@
             return;
         }
 
-        if (emptyState) {
-            emptyState.style.display = "none";
-        }
-
-
         events.forEach(function (event) {
 
             if (
                 event == null ||
-                event.track_id == null ||
-                displayedTrackIds.has(
-                    String(event.track_id)
-                )
+                event.track_id == null
             ) {
                 return;
             }
 
+            // Events are returned on every polling response. Render matches
+            // before skipping an already-rendered tracking card.
+            renderSimilarPeople(event);
+
+            const trackId = String(event.track_id);
+            const existingCard = Array.from(container.children).find(
+                function (card) {
+                    return card.dataset.trackId === trackId;
+                }
+            );
+
+            // Processing begins with a temporary report. Once the completed
+            // report is saved, polling returns its durable ID; update cards
+            // already rendered during processing before they can be selected.
+            if (existingCard && event.report_id != null) {
+                existingCard.dataset.reportId = String(event.report_id);
+                const existingImage = existingCard.querySelector("img");
+                if (existingImage) {
+                    existingImage.dataset.reportId = String(event.report_id);
+                }
+            }
+
+            // A matched upper-half crop belongs to an existing OSNet group,
+            // so it remains available in the backend but is not a separate
+            // person for manual selection.  A later transitive match can
+            // change an earlier representative into a group member; remove
+            // that now-duplicate card on the next polling response.
+            if (event.is_identity_representative === false) {
+                if (existingCard) {
+                    existingCard.remove();
+                }
+                displayedTrackIds.delete(trackId);
+                return;
+            }
+
+            if (displayedTrackIds.has(trackId)) {
+                return;
+            }
+
             displayedTrackIds.add(
-                String(event.track_id)
+                trackId
             );
 
 
@@ -215,6 +247,9 @@
             card.classList.toggle("selection-disabled", !isTrackSelectionEnabled);
             card.dataset.trackId = String(event.track_id);
             card.dataset.reportId = String(event.report_id);
+            if (event.identity_group_id !== undefined) {
+                card.dataset.identityGroupId = String(event.identity_group_id);
+            }
             card.dataset.selected = "false";
 
             const header =
@@ -336,6 +371,10 @@
                 image.dataset.reportId =
                     event.report_id;
 
+                if (event.identity_group_id !== undefined) {
+                    image.dataset.identityGroupId = event.identity_group_id;
+                }
+
 
                 image.loading = "lazy";
 
@@ -396,9 +435,71 @@
 
             container.appendChild(card);
         });
+
+        // An upload may contain only auto-matched events after a later group
+        // merge.  Keep the empty state accurate in that case.
+        if (emptyState) {
+            emptyState.style.display = container.children.length ? "none" : "flex";
+        }
+        updateSelectedPeopleUI();
     }
 
-    window.getSelectedTrackIdsForLightbox =
+    function renderSimilarPeople(event) {
+        const matches = event.similar_persons;
+        const container = document.getElementById("similar-person-matches");
+
+        if (!container || !Array.isArray(matches) || !matches.length) {
+            return;
+        }
+
+        matches.forEach(function (match) {
+            const pair = [String(event.track_id), String(match.track_id)]
+                .sort()
+                .join(":");
+
+            if (displayedSimilarityPairs.has(pair)) {
+                return;
+            }
+            displayedSimilarityPairs.add(pair);
+
+            const item = document.createElement("div");
+            item.className = "similar-person-match";
+
+            const title = document.createElement("div");
+            title.className = "similar-person-match-title";
+            title.textContent = "Likely same person";
+
+            const score = document.createElement("span");
+            score.textContent = " " + Math.round(Number(match.similarity) * 100) + "% match";
+            title.appendChild(score);
+
+            const images = document.createElement("div");
+            images.className = "similar-person-images";
+            [
+                [match.image_url, "Similar person, track " + match.track_id],
+                [event.image_url, "Current person, track " + event.track_id],
+            ].forEach(function (imageData) {
+                const image = document.createElement("img");
+                image.src = imageData[0];
+                image.alt = imageData[1];
+                image.loading = "lazy";
+                images.appendChild(image);
+            });
+
+            const meta = document.createElement("div");
+            meta.className = "similar-person-match-meta";
+            meta.textContent = "Track " + match.track_id + " (frame " +
+                match.frame + ") and Track " + event.track_id +
+                " (frame " + event.frame + ")";
+
+            item.appendChild(title);
+            item.appendChild(images);
+            item.appendChild(meta);
+            container.appendChild(item);
+        });
+    }
+
+    window.getSelectedIdentityGroupIdsForLightbox =
         function (lightboxTrackId) {
 
             const currentCard = document.querySelector(
@@ -407,24 +508,25 @@
                 '"]'
             );
 
-            // Do not use other selections unless this exact thumbnail is one
-            // of them. This preserves standalone generation for unselected
-            // thumbnails.
+            // An unselected lightbox card still represents its complete
+            // OSNet group, not just the one internal tracker ID.
             if (!currentCard || !currentCard.classList.contains("selected")) {
-                return [Number(lightboxTrackId)];
+                return currentCard
+                    ? [Number(currentCard.dataset.identityGroupId)]
+                    : [];
             }
 
             return Array.from(
                 document.querySelectorAll(".new-track-event.selected")
             )
                 .map(function (card) {
-                    return Number(card.dataset.trackId);
+                    return Number(card.dataset.identityGroupId);
                 })
-                .filter(function (trackId) {
-                    return Number.isInteger(trackId);
+                .filter(function (groupId) {
+                    return Number.isInteger(groupId);
                 })
-                .filter(function (trackId, index, trackIds) {
-                    return trackIds.indexOf(trackId) === index;
+                .filter(function (groupId, index, groupIds) {
+                    return groupIds.indexOf(groupId) === index;
                 })
                 .sort(function (first, second) {
                     return first - second;
@@ -443,9 +545,9 @@
     if (trackSelectedPeopleBtn) {
         trackSelectedPeopleBtn.addEventListener("click", function () {
             const selectedCards = getSelectedCards();
-            const trackIds = selectedCards
+            const identityGroupIds = selectedCards
                 .map(function (card) {
-                    return Number(card.dataset.trackId);
+                    return Number(card.dataset.identityGroupId);
                 })
                 .filter(Number.isInteger)
                 .sort(function (first, second) {
@@ -458,7 +560,7 @@
                 })
                 .filter(Boolean);
 
-            if (!trackIds.length || !reportIds.length) {
+            if (!identityGroupIds.length || !reportIds.length) {
                 alert("Select one or more tracked people first.");
                 return;
             }
@@ -468,8 +570,9 @@
                 return;
             }
 
-            // Open the first selected thumbnail so the generated video has
-            // the same preview experience as the lightbox action.
+            // Keep the existing generated-video experience in the lightbox.
+            // The main page retains the original processed video and later
+            // receives only the selected groups' upper-half crops.
             const firstImage = selectedCards[0].querySelector("img");
             if (firstImage) {
                 firstImage.click();
@@ -477,7 +580,7 @@
 
             if (window.generateSeparateVideo) {
                 window.generateSeparateVideo(
-                    trackIds,
+                    identityGroupIds,
                     reportIds[0],
                     trackSelectedPeopleBtn
                 );
@@ -787,6 +890,10 @@
             resultsSection.innerHTML =
                 "";
 
+            if (window.clearMainTrackedVideoGroups) {
+                window.clearMainTrackedVideoGroups();
+            }
+
 
             const videoSectionOnSubmit =
                 document.getElementById(
@@ -815,6 +922,16 @@
 
             displayedTrackIds =
                 new Set();
+
+            displayedSimilarityPairs =
+                new Set();
+
+            const similarPeople = document.getElementById(
+                "similar-person-matches"
+            );
+            if (similarPeople) {
+                similarPeople.innerHTML = "";
+            }
 
 
             const newTrackEvents =

@@ -9,11 +9,95 @@
             "lightbox-track-guide"
         );
 
+    const mainVideoSection =
+        document.getElementById("video-result-section");
+
+    const mainTrackedVideoGroups =
+        document.getElementById("tracked-video-groups-main");
+
+    const mainTrackedVideoGroupList =
+        document.getElementById("tracked-video-group-list-main");
+
     if (!trackPersonBtn) {
         return;
     }
 
     trackPersonBtn.style.display = "none";
+
+    function clearMainTrackedVideoGroups() {
+        if (mainTrackedVideoGroupList) {
+            mainTrackedVideoGroupList.innerHTML = "";
+        }
+        if (mainTrackedVideoGroups) {
+            mainTrackedVideoGroups.style.display = "none";
+        }
+    }
+
+    function renderMainTrackedVideoGroups(identityGroups) {
+        clearMainTrackedVideoGroups();
+
+        if (
+            !mainTrackedVideoGroups ||
+            !mainTrackedVideoGroupList ||
+            !Array.isArray(identityGroups)
+        ) {
+            return;
+        }
+
+        identityGroups.forEach(function (group) {
+            const crops = Array.isArray(group.crops) ? group.crops : [];
+            if (!crops.length) {
+                return;
+            }
+
+            const groupElement = document.createElement("section");
+            groupElement.className = "tracked-video-group";
+
+            const heading = document.createElement("h4");
+            heading.textContent =
+                "Group " + group.identity_group_id +
+                " · representative track " + group.representative_track_id;
+            groupElement.appendChild(heading);
+
+            const cropList = document.createElement("div");
+            cropList.className = "tracked-video-group-crops";
+            crops.forEach(function (crop) {
+                const cropItem = document.createElement("figure");
+                const image = document.createElement("img");
+                image.src = crop.image_url;
+                image.alt =
+                    "Upper-half crop for track " + crop.track_id +
+                    " at frame " + crop.frame;
+                image.loading = "lazy";
+
+                const caption = document.createElement("figcaption");
+                caption.textContent =
+                    "Track " + crop.track_id + " · frame " + crop.frame;
+
+                cropItem.appendChild(image);
+                cropItem.appendChild(caption);
+                cropList.appendChild(cropItem);
+            });
+
+            groupElement.appendChild(cropList);
+            mainTrackedVideoGroupList.appendChild(groupElement);
+        });
+
+        if (mainTrackedVideoGroupList.children.length) {
+            mainTrackedVideoGroups.style.display = "block";
+        }
+    }
+
+    window.clearMainTrackedVideoGroups = clearMainTrackedVideoGroups;
+
+    function showTrackedVideoGroupsOnPage(identityGroups) {
+        // The generated selected-person video stays in the lightbox.  Do not
+        // replace the original processed video in the main Tracked Video card.
+        if (mainVideoSection) {
+            mainVideoSection.style.display = "block";
+        }
+        renderMainTrackedVideoGroups(identityGroups);
+    }
 
 
     // ---------------------------------------------------------
@@ -39,7 +123,7 @@
     // ---------------------------------------------------------
 
     window.generateSeparateVideo = async function (
-        trackIds,
+        identityGroupIds,
         reportId,
         triggerButton
     ) {
@@ -48,17 +132,16 @@
         triggerButton.textContent = "Generating...";
 
         if (window.showLightboxVideoLoading) {
-            window.showLightboxVideoLoading(trackIds);
+            window.showLightboxVideoLoading(identityGroupIds);
         }
 
         try {
             const formData = new FormData();
 
-            if (trackIds.length > 1) {
-                formData.append("track_ids", JSON.stringify(trackIds));
-            } else {
-                formData.append("track_id", trackIds[0]);
-            }
+            formData.append(
+                "identity_group_ids",
+                JSON.stringify(identityGroupIds)
+            );
             formData.append("report_id", reportId);
 
             const config = document.getElementById("app-config");
@@ -82,10 +165,12 @@
             }
 
             console.log("Separate video generated:", data.video_url);
+            showTrackedVideoGroupsOnPage(data.identity_groups);
             if (window.showLightboxSeparateVideo) {
                 window.showLightboxSeparateVideo(
                     data.video_url,
-                    data.track_ids
+                    data.track_ids,
+                    []
                 );
             }
         } catch (error) {
@@ -125,18 +210,21 @@
             // A merged video is only requested when the thumbnail currently
             // open in the lightbox is itself selected. An unselected thumbnail
             // always retains the original single-person behaviour.
-            const selectedTrackIds =
-                window.getSelectedTrackIdsForLightbox
-                    ? window.getSelectedTrackIdsForLightbox(
+            const selectedIdentityGroupIds =
+                window.getSelectedIdentityGroupIdsForLightbox
+                    ? window.getSelectedIdentityGroupIdsForLightbox(
                         trackData.trackId
                     )
-                    : [Number(trackData.trackId)];
+                    : [];
+
+            if (!selectedIdentityGroupIds.length) {
+                alert("This thumbnail does not have an OSNet identity group.");
+                return;
+            }
 
             console.log(
                 "Track Person request:",
-                selectedTrackIds.length > 1
-                    ? "merged track IDs " + selectedTrackIds.join(", ")
-                    : "single track ID " + selectedTrackIds[0]
+                "identity groups " + selectedIdentityGroupIds.join(", ")
             );
 
             trackPersonBtn.disabled =
@@ -146,7 +234,7 @@
                 "Generating...";
 
             if (window.showLightboxVideoLoading) {
-                window.showLightboxVideoLoading(selectedTrackIds);
+                window.showLightboxVideoLoading(selectedIdentityGroupIds);
             }
 
 
@@ -156,17 +244,10 @@
                     new FormData();
 
 
-                if (selectedTrackIds.length > 1) {
-                    formData.append(
-                        "track_ids",
-                        JSON.stringify(selectedTrackIds)
-                    );
-                } else {
-                    formData.append(
-                        "track_id",
-                        selectedTrackIds[0]
-                    );
-                }
+                formData.append(
+                    "identity_group_ids",
+                    JSON.stringify(selectedIdentityGroupIds)
+                );
 
                 formData.append(
                     "report_id",
@@ -222,6 +303,7 @@
                     "Separate video generated:",
                     data.video_url
                 );
+                showTrackedVideoGroupsOnPage(data.identity_groups);
 
                 if (
                     window.showLightboxSeparateVideo
@@ -229,7 +311,8 @@
 
                     window.showLightboxSeparateVideo(
                         data.video_url,
-                        data.track_ids
+                        data.track_ids,
+                        []
                     );
                 }
             } catch (error) {

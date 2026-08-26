@@ -1,4 +1,3 @@
-/* <style> */
 
 :root{
     --bg:#f4f6fb;
@@ -705,6 +704,101 @@ img.zoomable,
     margin-top:16px;
 }
 
+/* Shown below a generated tracked video; each section represents one OSNet
+   identity group included in that video. */
+#tracked-video-groups {
+    width:min(92vw, 1100px);
+    max-height:28vh;
+    overflow-y:auto;
+    margin-top:14px;
+    padding:14px;
+    border-radius:12px;
+    background:rgba(255,255,255,0.1);
+    color:#fff;
+}
+
+#tracked-video-groups h3 {
+    margin:0 0 12px;
+    font-size:13px;
+}
+
+#tracked-video-group-list {
+    display:grid;
+    gap:12px;
+}
+
+.tracked-video-group {
+    padding:10px;
+    border-radius:9px;
+    background:rgba(0,0,0,0.16);
+}
+
+.tracked-video-group h4 {
+    margin:0 0 8px;
+    font-size:12px;
+    font-weight:600;
+}
+
+.tracked-video-group-crops {
+    display:flex;
+    gap:8px;
+    overflow-x:auto;
+}
+
+.tracked-video-group-crops figure {
+    width:96px;
+    flex:0 0 96px;
+    margin:0;
+}
+
+.tracked-video-group-crops img {
+    display:block;
+    width:96px;
+    height:96px;
+    object-fit:contain;
+    border-radius:7px;
+    background:#fff;
+}
+
+.tracked-video-group-crops figcaption {
+    margin-top:4px;
+    color:rgba(255,255,255,0.78);
+    font-size:10px;
+    line-height:1.25;
+}
+
+/* Identity groups shown under the generated Track Person video on the page. */
+#tracked-video-groups-main {
+    margin-top:18px;
+    padding-top:16px;
+    border-top:1px solid var(--border);
+}
+
+#tracked-video-groups-main h3 {
+    margin:0 0 12px;
+    font-size:14px;
+}
+
+#tracked-video-group-list-main {
+    display:grid;
+    gap:12px;
+}
+
+#tracked-video-groups-main .tracked-video-group {
+    padding:12px;
+    border:1px solid var(--border);
+    background:#fafbfe;
+}
+
+#tracked-video-groups-main .tracked-video-group-crops img {
+    border:1px solid var(--border);
+    background:#fff;
+}
+
+#tracked-video-groups-main .tracked-video-group-crops figcaption {
+    color:var(--text-muted);
+}
+
 #lightbox-actions button {
     background:rgba(255,255,255,0.95);
     color:var(--text);
@@ -806,4 +900,4 @@ img.zoomable,
     }
 }
 
-/* </style> */
+</style>

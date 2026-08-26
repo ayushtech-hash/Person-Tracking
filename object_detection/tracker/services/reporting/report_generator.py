@@ -1,6 +1,11 @@
 from tracker.services.tracking.presence_tracker import PresenceReport
 from typing import Dict, List, Optional, Union
-from tracker.models import PersonTrackStats, TrackingReport,TrackFrameEvent
+from tracker.models import (
+    PersonIdentityGroup,
+    PersonTrackStats,
+    TrackingReport,
+    TrackFrameEvent,
+)
 
 
 class ReportGenerator:
@@ -81,58 +86,100 @@ class ReportGenerator:
         input_video_url: str = "",
         selected_track_id: Optional[int] = None,
         frame_events: Optional[List[Dict]] = None,
+        identity_groups: Optional[List[Dict]] = None,
+        tracking_report: Optional[TrackingReport] = None,
     ) -> TrackingReport:
 
         frame_events = frame_events or []
+        identity_groups = identity_groups or []
 
         # =========================================================
-        # 1. Create TrackingReport + PersonTrackStats
+        # 1. Create or finalize TrackingReport + PersonTrackStats
         # =========================================================
 
         if "reports" in report_data:
+            report_items = report_data["reports"]
+            peak_persons_detected = report_data["peak_persons_detected"]
+            total_visible_time = report_data["total_visible_time"]
+            final_selected_track_id = None
+        else:
+            report_items = [report_data]
+            peak_persons_detected = report_data["peak_persons_detected"]
+            total_visible_time = report_data["visible_duration"]
+            final_selected_track_id = selected_track_id or report_data["track_id"]
 
-            tracking_report = TrackingReport.objects.create(
-                input_video=input_video_url,
-                output_video=output_video_url,
-                peak_persons_detected=report_data["peak_persons_detected"],
-                total_visible_time=report_data["total_visible_time"],
-            )
-
-            PersonTrackStats.objects.bulk_create(
-                [
-                    PersonTrackStats(
-                        report=tracking_report,
-                        track_id=item["track_id"],
-                        first_seen=item["first_seen"],
-                        last_seen=item["last_seen"],
-                        visible_duration=item["visible_duration"],
-                        frames_seen=item["frames_seen"],
-                    )
-                    for item in report_data["reports"]
+        if tracking_report is not None:
+            # The processing report already owns every TrackFrameEvent saved
+            # while frames were being processed.  Finalize it in place rather
+            # than creating a second report that would contain only snapshots.
+            tracking_report.input_video = input_video_url
+            tracking_report.output_video = output_video_url
+            tracking_report.peak_persons_detected = peak_persons_detected
+            tracking_report.total_visible_time = total_visible_time
+            tracking_report.selected_track_id = final_selected_track_id
+            tracking_report.save(
+                update_fields=[
+                    "input_video",
+                    "output_video",
+                    "peak_persons_detected",
+                    "total_visible_time",
+                    "selected_track_id",
                 ]
             )
 
+            for item in report_items:
+                PersonTrackStats.objects.update_or_create(
+                    report=tracking_report,
+                    track_id=item["track_id"],
+                    defaults={
+                        "first_seen": item["first_seen"],
+                        "last_seen": item["last_seen"],
+                        "visible_duration": item["visible_duration"],
+                        "frames_seen": item["frames_seen"],
+                    },
+                )
+
+        if "reports" in report_data:
+            if tracking_report is None:
+                tracking_report = TrackingReport.objects.create(
+                    input_video=input_video_url,
+                    output_video=output_video_url,
+                    peak_persons_detected=peak_persons_detected,
+                    total_visible_time=total_visible_time,
+                )
+
+                PersonTrackStats.objects.bulk_create(
+                    [
+                        PersonTrackStats(
+                            report=tracking_report,
+                            track_id=item["track_id"],
+                            first_seen=item["first_seen"],
+                            last_seen=item["last_seen"],
+                            visible_duration=item["visible_duration"],
+                            frames_seen=item["frames_seen"],
+                        )
+                        for item in report_items
+                    ]
+                )
+
         else:
+            if tracking_report is None:
+                tracking_report = TrackingReport.objects.create(
+                    input_video=input_video_url,
+                    output_video=output_video_url,
+                    peak_persons_detected=peak_persons_detected,
+                    total_visible_time=total_visible_time,
+                    selected_track_id=final_selected_track_id,
+                )
 
-            tracking_report = TrackingReport.objects.create(
-                input_video=input_video_url,
-                output_video=output_video_url,
-                peak_persons_detected=report_data["peak_persons_detected"],
-                total_visible_time=report_data["visible_duration"],
-                selected_track_id=(
-                    selected_track_id
-                    or report_data["track_id"]
-                ),
-            )
-
-            PersonTrackStats.objects.create(
-                report=tracking_report,
-                track_id=report_data["track_id"],
-                first_seen=report_data["first_seen"],
-                last_seen=report_data["last_seen"],
-                visible_duration=report_data["visible_duration"],
-                frames_seen=report_data["frames_seen"],
-            )
+                PersonTrackStats.objects.create(
+                    report=tracking_report,
+                    track_id=report_data["track_id"],
+                    first_seen=report_data["first_seen"],
+                    last_seen=report_data["last_seen"],
+                    visible_duration=report_data["visible_duration"],
+                    frames_seen=report_data["frames_seen"],
+                )
 
         # =========================================================
         # 2. Get the PersonTrackStats we just created
@@ -146,10 +193,59 @@ class ReportGenerator:
         }
 
         # =========================================================
-        # 3. Create TrackFrameEvent records
+        # 3. Persist OSNet identity groups and connect their tracks
         # =========================================================
 
-        frame_event_objects = []
+        # The OSNet index is scoped to one upload.  Its numeric group key is
+        # meaningful only inside this report, which is why the model enforces
+        # uniqueness on (report, group_key).
+        for group in identity_groups:
+            group_key = group.get("identity_group_id")
+            representative_track_id = group.get("representative_track_id")
+            if group_key is None or representative_track_id is None:
+                continue
+
+            PersonIdentityGroup.objects.update_or_create(
+                report=tracking_report,
+                group_key=int(group_key),
+                defaults={
+                    "representative_track_id": int(representative_track_id),
+                },
+            )
+
+        if identity_groups:
+            persisted_groups = {
+                group.group_key: group
+                for group in tracking_report.identity_groups.all()
+            }
+            tracks_to_update = []
+
+            for group in identity_groups:
+                group_key = group.get("identity_group_id")
+                persisted_group = persisted_groups.get(group_key)
+                if persisted_group is None:
+                    continue
+
+                for track_id in group.get("track_ids", []):
+                    track_stat = track_stats_by_id.get(int(track_id))
+                    if track_stat is None:
+                        print(
+                            f"WARNING: No PersonTrackStats found for "
+                            f"identity-group track_id={track_id}"
+                        )
+                        continue
+                    track_stat.identity_group = persisted_group
+                    tracks_to_update.append(track_stat)
+
+            if tracks_to_update:
+                PersonTrackStats.objects.bulk_update(
+                    tracks_to_update,
+                    ["identity_group"],
+                )
+
+        # =========================================================
+        # 4. Create TrackFrameEvent records
+        # =========================================================
 
         for event in frame_events:
 
@@ -169,47 +265,27 @@ class ReportGenerator:
                 )
                 continue
 
-            frame_event_objects.append(
-                TrackFrameEvent(
-                    track=track_stat,
-
-                    frame_number=int(
-                        event.get("frame", 0)
-                    ),
-
-                    timestamp=float(
+            # The per-frame callback has normally already created this row.
+            # Update the snapshot URLs without replacing its full-frame URL,
+            # which is the frame stream used for generated videos.
+            frame_event, created = TrackFrameEvent.objects.update_or_create(
+                track=track_stat,
+                frame_number=int(event.get("frame", 0)),
+                defaults={
+                    "timestamp": float(
                         event.get("time_sec", event.get("time", 0))
                     ),
-
-                    full_frame_url=(
-                        event.get("full_frame_url", "")
-                    ),
-
-                    cropped_image_url=(
-                        event.get("person_crop_url", "")
-                    ),
-
-                    thumbnail_url=(
-                        event.get("image_url", "")
-                    ),
-                )
+                    "cropped_image_url": event.get("person_crop_url", ""),
+                    "thumbnail_url": event.get("image_url", ""),
+                },
             )
+            if created:
+                frame_event.full_frame_url = event.get("full_frame_url", "")
+                frame_event.save(update_fields=["full_frame_url"])
 
         # =========================================================
-        # 4. Save all frame events at once
+        # 5. Save all frame events at once
         # =========================================================
-
-        if frame_event_objects:
-
-            TrackFrameEvent.objects.bulk_create(
-                frame_event_objects,
-                ignore_conflicts=True,
-            )
-
-            print(
-                f"SAVED {len(frame_event_objects)} "
-                f"track frame events to database"
-            )
 
         return tracking_report
 

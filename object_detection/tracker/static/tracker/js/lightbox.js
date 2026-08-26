@@ -46,6 +46,12 @@
             "lightbox-track-guide"
         );
 
+    const trackedVideoGroups =
+        document.getElementById("tracked-video-groups");
+
+    const trackedVideoGroupList =
+        document.getElementById("tracked-video-group-list");
+
 
     if (!overlay || !overlayImg || !closeBtn) {
         return;
@@ -121,6 +127,72 @@
         }
     };
 
+    function clearTrackedVideoGroups() {
+        if (trackedVideoGroupList) {
+            trackedVideoGroupList.innerHTML = "";
+        }
+        if (trackedVideoGroups) {
+            trackedVideoGroups.style.display = "none";
+        }
+    }
+
+    function renderTrackedVideoGroups(identityGroups) {
+        clearTrackedVideoGroups();
+
+        if (
+            !trackedVideoGroups ||
+            !trackedVideoGroupList ||
+            !Array.isArray(identityGroups) ||
+            !identityGroups.length
+        ) {
+            return;
+        }
+
+        identityGroups.forEach(function (group) {
+            const crops = Array.isArray(group.crops) ? group.crops : [];
+            if (!crops.length) {
+                return;
+            }
+
+            const groupElement = document.createElement("section");
+            groupElement.className = "tracked-video-group";
+
+            const heading = document.createElement("h4");
+            heading.textContent =
+                "Group " + group.identity_group_id +
+                " · representative track " + group.representative_track_id;
+            groupElement.appendChild(heading);
+
+            const cropList = document.createElement("div");
+            cropList.className = "tracked-video-group-crops";
+
+            crops.forEach(function (crop) {
+                const cropItem = document.createElement("figure");
+                const image = document.createElement("img");
+                image.src = crop.image_url;
+                image.alt =
+                    "Upper-half crop for track " + crop.track_id +
+                    " at frame " + crop.frame;
+                image.loading = "lazy";
+
+                const caption = document.createElement("figcaption");
+                caption.textContent =
+                    "Track " + crop.track_id + " · frame " + crop.frame;
+
+                cropItem.appendChild(image);
+                cropItem.appendChild(caption);
+                cropList.appendChild(cropItem);
+            });
+
+            groupElement.appendChild(cropList);
+            trackedVideoGroupList.appendChild(groupElement);
+        });
+
+        if (trackedVideoGroupList.children.length) {
+            trackedVideoGroups.style.display = "block";
+        }
+    }
+
 
     // ---------------------------------------------------------
     // Open Lightbox
@@ -149,6 +221,8 @@
             reportId || null;
 
         currentSeparateVideo = "";
+
+        clearTrackedVideoGroups();
 
         window.hideLightboxVideoLoading();
 
@@ -179,6 +253,8 @@
 
         overlayVideo.style.display =
             "none";
+
+        clearTrackedVideoGroups();
 
 
         overlayCaption.textContent =
@@ -339,7 +415,11 @@
     // Show Separate Video
     // ---------------------------------------------------------
 
-    window.showLightboxSeparateVideo = function (videoUrl, trackIds) {
+    window.showLightboxSeparateVideo = function (
+        videoUrl,
+        trackIds,
+        identityGroups
+    ) {
         if (!videoUrl) {
             return;
         }
@@ -366,6 +446,8 @@
         overlayVideo.play().catch(function () {
             // Browser may block autoplay.
         });
+
+        renderTrackedVideoGroups(identityGroups);
     
         overlayCaption.textContent =
             Array.isArray(trackIds) && trackIds.length > 1
@@ -403,6 +485,8 @@
         currentPersonImage = "";
         currentFullFrameImage = "";
         currentSeparateVideo = "";
+
+        clearTrackedVideoGroups();
 
         window.hideLightboxVideoLoading();
 

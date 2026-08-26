@@ -75,6 +75,11 @@ def get_video_directories(version):
             "track_crops",
         ),
 
+        "upper_half_cropped": os.path.join(
+            video_root,
+            "upper_half_cropped",
+        ),
+
         "track_frames": os.path.join(
             video_root,
             "track_frames",

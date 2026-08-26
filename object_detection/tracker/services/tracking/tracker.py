@@ -22,7 +22,7 @@ class PersonTracker:
         self,
         fps: float,
         tracker_type: str = "deepsort",
-    ):
+    ):  
 
         self.tracker_type = tracker_type.lower()
 
@@ -32,7 +32,7 @@ class PersonTracker:
         if self.tracker_type == "bytetrack":
 
             self.tracker = sv.ByteTrack(
-                track_activation_threshold=0.60,
+                track_activation_threshold=0.50,
                 # track_high_thresh=0.60,
                 # new_track_thresh=0.40,
                 lost_track_buffer=int(round(fps * 2)),
