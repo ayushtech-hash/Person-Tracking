@@ -17,6 +17,13 @@ from .models import (
 )
 
 
+class AuthenticationRoutingTests(TestCase):
+    def test_root_redirects_anonymous_users_to_login(self):
+        response = self.client.get('/')
+
+        self.assertRedirects(response, '/login/?next=/', fetch_redirect_response=False)
+
+
 class PersonSimilarityIndexTests(TestCase):
     def _event(self, track_id, frame):
         return {
@@ -104,6 +111,74 @@ class PersonSimilarityIndexTests(TestCase):
             [2],
         )
 
+    def test_serialized_report_combines_active_identity_group_stats(self):
+        report = ReportGenerator.save_to_database(
+            report_data={
+                "reports": [
+                    {
+                        "track_id": 8,
+                        "first_seen": 2.0,
+                        "last_seen": 5.0,
+                        "visible_duration": 3.0,
+                        "frames_seen": 30,
+                    },
+                    {
+                        "track_id": 3,
+                        "first_seen": 0.5,
+                        "last_seen": 4.0,
+                        "visible_duration": 2.0,
+                        "frames_seen": 20,
+                    },
+                    {
+                        "track_id": 11,
+                        "first_seen": 7.0,
+                        "last_seen": 8.0,
+                        "visible_duration": 1.0,
+                        "frames_seen": 10,
+                    },
+                ],
+                "peak_persons_detected": 2,
+                "total_visible_time": 6.0,
+            },
+            output_video_url="/media/output.mp4",
+            identity_groups=[
+                {
+                    "identity_group_id": 1,
+                    "representative_track_id": 8,
+                    "track_ids": [8, 3],
+                },
+                {
+                    "identity_group_id": 2,
+                    "representative_track_id": 11,
+                    "track_ids": [11],
+                },
+            ],
+        )
+
+        serialized = ReportGenerator.serialize_tracking_report(report)
+
+        self.assertEqual(
+            serialized["reports"],
+            [
+                {
+                    "track_id": 3,
+                    "identity_group_id": 1,
+                    "first_seen": 0.5,
+                    "last_seen": 5.0,
+                    "visible_duration": 5.0,
+                    "frames_seen": 50,
+                },
+                {
+                    "track_id": 11,
+                    "identity_group_id": 2,
+                    "first_seen": 7.0,
+                    "last_seen": 8.0,
+                    "visible_duration": 1.0,
+                    "frames_seen": 10,
+                },
+            ],
+        )
+
     def test_manual_review_range_creates_suggestion_between_groups(self):
         index = PersonSimilarityIndex(
             threshold=0.8,
@@ -171,6 +246,107 @@ class PersonSimilarityIndexTests(TestCase):
         self.assertEqual(suggestion.second_group.group_key, 2)
         self.assertEqual(suggestion.first_track_id, 1)
         self.assertEqual(suggestion.second_frame_number, 40)
+
+    def test_manual_merge_combines_serialized_report_stats_until_undone(self):
+        report = ReportGenerator.save_to_database(
+            report_data={
+                "reports": [
+                    {
+                        "track_id": 1,
+                        "first_seen": 0.0,
+                        "last_seen": 1.0,
+                        "visible_duration": 1.0,
+                        "frames_seen": 10,
+                    },
+                    {
+                        "track_id": 2,
+                        "first_seen": 3.0,
+                        "last_seen": 5.0,
+                        "visible_duration": 2.0,
+                        "frames_seen": 20,
+                    },
+                ],
+                "peak_persons_detected": 2,
+                "total_visible_time": 3.0,
+            },
+            output_video_url="/media/output.mp4",
+            identity_groups=[
+                {"identity_group_id": 1, "representative_track_id": 1, "track_ids": [1]},
+                {"identity_group_id": 2, "representative_track_id": 2, "track_ids": [2]},
+            ],
+            manual_grouping_suggestions=[
+                {
+                    "first_identity_group_id": 1,
+                    "second_identity_group_id": 2,
+                    "first_track_id": 1,
+                    "first_frame": 1,
+                    "first_image_url": "/first.jpg",
+                    "second_track_id": 2,
+                    "second_frame": 40,
+                    "second_image_url": "/second.jpg",
+                    "similarity": 0.75,
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [row["track_id"] for row in ReportGenerator.serialize_tracking_report(report)["reports"]],
+            [1, 2],
+        )
+
+        suggestion = ManualGroupingSuggestion.objects.get(report=report)
+        merge_response = self.client.post(
+            reverse("merge_manual_identity_groups"),
+            {"report_id": report.id, "suggestion_id": suggestion.id},
+        )
+        self.assertEqual(merge_response.status_code, 200)
+        self.assertEqual(
+            merge_response.json()["report"]["reports"],
+            [
+                {
+                    "track_id": 1,
+                    "identity_group_id": 1,
+                    "first_seen": 0.0,
+                    "last_seen": 5.0,
+                    "visible_duration": 3.0,
+                    "frames_seen": 30,
+                }
+            ],
+        )
+
+        merged_report = TrackingReport.objects.get(id=report.id)
+        self.assertEqual(
+            ReportGenerator.serialize_tracking_report(merged_report)["reports"],
+            [
+                {
+                    "track_id": 1,
+                    "identity_group_id": 1,
+                    "first_seen": 0.0,
+                    "last_seen": 5.0,
+                    "visible_duration": 3.0,
+                    "frames_seen": 30,
+                }
+            ],
+        )
+
+        undo_response = self.client.post(
+            reverse("undo_manual_identity_group_merge"),
+            {
+                "report_id": report.id,
+                "manual_merge_id": merge_response.json()["manual_merge_id"],
+            },
+        )
+        self.assertEqual(undo_response.status_code, 200)
+        self.assertEqual(
+            [row["track_id"] for row in undo_response.json()["report"]["reports"]],
+            [1, 2],
+        )
+
+        undone_report = TrackingReport.objects.get(id=report.id)
+        self.assertEqual(
+            [row["track_id"] for row in ReportGenerator.serialize_tracking_report(undone_report)["reports"]],
+            [1, 2],
+        )
 
     def test_manual_group_endpoint_merges_tracks_into_earliest_group(self):
         report = ReportGenerator.save_to_database(
@@ -263,6 +439,85 @@ class PersonSimilarityIndexTests(TestCase):
         self.assertTrue(merge_history.is_undone)
         self.assertEqual(suggestion.status, ManualGroupingSuggestion.Status.PENDING)
         self.assertFalse(suggestion.is_resolved)
+
+    def test_selected_group_endpoint_merges_multiple_thumbnail_groups(self):
+        report = ReportGenerator.save_to_database(
+            report_data={
+                "reports": [
+                    {
+                        "track_id": track_id,
+                        "first_seen": first_seen,
+                        "last_seen": last_seen,
+                        "visible_duration": duration,
+                        "frames_seen": frames,
+                    }
+                    for track_id, first_seen, last_seen, duration, frames in [
+                        (1, 0.0, 2.0, 2.0, 20),
+                        (4, 3.0, 4.0, 1.0, 10),
+                        (8, 5.0, 6.0, 1.0, 10),
+                        (9, 8.0, 9.0, 1.0, 10),
+                        (11, 10.0, 12.0, 2.0, 20),
+                    ]
+                ],
+                "peak_persons_detected": 2,
+                "total_visible_time": 7.0,
+            },
+            output_video_url="/media/output.mp4",
+            identity_groups=[
+                {
+                    "identity_group_id": 1,
+                    "representative_track_id": 1,
+                    "track_ids": [1, 4, 8],
+                },
+                {
+                    "identity_group_id": 9,
+                    "representative_track_id": 9,
+                    "track_ids": [9, 11],
+                },
+            ],
+        )
+
+        response = self.client.post(
+            reverse("merge_selected_identity_groups"),
+            {
+                "report_id": report.id,
+                "identity_group_ids": json.dumps([1, 9]),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["identity_group_id"], 1)
+        self.assertEqual(data["duplicate_identity_group_ids"], [9])
+        self.assertEqual(data["representative_track_id"], 1)
+        self.assertEqual(
+            data["report"]["reports"],
+            [
+                {
+                    "track_id": 1,
+                    "identity_group_id": 1,
+                    "first_seen": 0.0,
+                    "last_seen": 12.0,
+                    "visible_duration": 7.0,
+                    "frames_seen": 70,
+                }
+            ],
+        )
+
+        surviving_group = report.identity_groups.get(group_key=1)
+        absorbed_group = report.identity_groups.get(group_key=9)
+        self.assertTrue(surviving_group.is_active)
+        self.assertFalse(absorbed_group.is_active)
+        self.assertEqual(absorbed_group.merged_into_id, surviving_group.id)
+        self.assertEqual(
+            list(
+                surviving_group.tracks.order_by("track_id").values_list(
+                    "track_id",
+                    flat=True,
+                )
+            ),
+            [1, 4, 8, 9, 11],
+        )
 
     def test_dismissed_manual_suggestion_does_not_change_groups(self):
         report = ReportGenerator.save_to_database(

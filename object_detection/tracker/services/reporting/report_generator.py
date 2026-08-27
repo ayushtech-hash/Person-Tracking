@@ -336,10 +336,59 @@ class ReportGenerator:
         return tracking_report
 
     @staticmethod
+    def _serialize_track_stats_row(
+        stats: List[PersonTrackStats],
+        identity_group_id: int = None,
+    ) -> Dict[str, Union[int, float]]:
+        representative_track_id = min(stat.track_id for stat in stats)
+
+        row = {
+            "track_id": representative_track_id,
+            "first_seen": min(stat.first_seen for stat in stats),
+            "last_seen": max(stat.last_seen for stat in stats),
+            "visible_duration": sum(stat.visible_duration for stat in stats),
+            "frames_seen": sum(stat.frames_seen for stat in stats),
+        }
+        if identity_group_id is not None:
+            row["identity_group_id"] = identity_group_id
+
+        return row
+
+    @staticmethod
+    def _serialize_grouped_track_stats(
+        track_stats: List[PersonTrackStats],
+    ) -> List[Dict[str, Union[int, float]]]:
+        grouped_stats = {}
+        display_rows = []
+
+        for stat in track_stats:
+            identity_group = stat.identity_group
+
+            if identity_group and identity_group.is_active:
+                grouped_stats.setdefault(identity_group.id, []).append(stat)
+            else:
+                display_rows.append(
+                    ReportGenerator._serialize_track_stats_row([stat])
+                )
+
+        for stats in grouped_stats.values():
+            identity_group = stats[0].identity_group
+            display_rows.append(
+                ReportGenerator._serialize_track_stats_row(
+                    stats,
+                    identity_group_id=identity_group.group_key,
+                )
+            )
+
+        return sorted(display_rows, key=lambda row: row["track_id"])
+
+    @staticmethod
     def serialize_tracking_report(
         tracking_report: TrackingReport,
     ) -> Dict[str, Union[int, float, str, List[Dict]]]:
-        track_stats = list(tracking_report.track_stats.all())
+        track_stats = list(
+            tracking_report.track_stats.select_related("identity_group")
+        )
 
         if tracking_report.selected_track_id is not None:
             stat = track_stats[0]
@@ -356,16 +405,9 @@ class ReportGenerator:
 
         return {
             "id": tracking_report.id,
-            "reports": [
-                {
-                    "track_id": stat.track_id,
-                    "first_seen": stat.first_seen,
-                    "last_seen": stat.last_seen,
-                    "visible_duration": stat.visible_duration,
-                    "frames_seen": stat.frames_seen,
-                }
-                for stat in track_stats
-            ],
+            "reports": ReportGenerator._serialize_grouped_track_stats(
+                track_stats
+            ),
             "peak_persons_detected": tracking_report.peak_persons_detected,
             "total_visible_time": tracking_report.total_visible_time,
             "output_video": tracking_report.output_video,

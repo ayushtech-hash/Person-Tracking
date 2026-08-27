@@ -11,6 +11,8 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,9 +27,9 @@ SECRET_KEY = 'django-insecure-ivx#m58@!5f7#p^pw_0svqw-bp0@5o2a)uhcq6h=09pj*a68^&
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['bd84-150-129-146-122.ngrok-free.app','127.0.0.1:8000','127.0.0.1']
+ALLOWED_HOSTS = ['00fd-150-129-146-122.ngrok-free.app','127.0.0.1:8000','127.0.0.1']
 CSRF_TRUSTED_ORIGINS = [
-    "https://bd84-150-129-146-122.ngrok-free.app",
+    "https://00fd-150-129-146-122.ngrok-free.app",
 ]
 
 # Application definition
@@ -40,6 +42,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'tracker',
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
 ]
 
 MIDDLEWARE = [
@@ -145,3 +150,26 @@ LOGGING = {
         },
     },
 }
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'tracker.services.auth.authentication.CookieJWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+}
+
+# Cookie names/flags used by tracker/services/auth/tokens.py
+AUTH_COOKIE_ACCESS = 'access_token'
+AUTH_COOKIE_REFRESH = 'refresh_token'
+AUTH_COOKIE_SECURE = False     # set True once you're serving over HTTPS
+AUTH_COOKIE_SAMESITE = 'Lax'

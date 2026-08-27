@@ -78,28 +78,58 @@
 
     window.applyManualGroupMerge = function (mergeData) {
         const primaryGroupId = String(mergeData.identity_group_id);
-        const duplicateGroupId = String(mergeData.duplicate_identity_group_id);
-        const primaryCard = document.querySelector(
+        const duplicateGroupIds = mergeData.duplicate_identity_group_ids || [
+            mergeData.duplicate_identity_group_id
+        ];
+        let primaryCard = document.querySelector(
             '.new-track-event[data-identity-group-id="' + primaryGroupId + '"]'
-        );
-        const duplicateCard = document.querySelector(
-            '.new-track-event[data-identity-group-id="' + duplicateGroupId + '"]'
         );
 
         // If the duplicate had been selected, preserve that user choice by
         // selecting the surviving representative before removing the card.
         if (
-            duplicateCard &&
-            duplicateCard.classList.contains("selected") &&
+            duplicateGroupIds.some(function (groupId) {
+                const duplicateCard = document.querySelector(
+                    '.new-track-event[data-identity-group-id="' +
+                    String(groupId) +
+                    '"]'
+                );
+                return duplicateCard && duplicateCard.classList.contains("selected");
+            }) &&
             primaryCard
         ) {
             primaryCard.classList.add("selected");
             primaryCard.dataset.selected = "true";
         }
 
-        if (duplicateCard) {
-            displayedTrackIds.delete(duplicateCard.dataset.trackId);
-            duplicateCard.remove();
+        duplicateGroupIds.forEach(function (groupId) {
+            const duplicateCard = document.querySelector(
+                '.new-track-event[data-identity-group-id="' +
+                String(groupId) +
+                '"]'
+            );
+            if (duplicateCard) {
+                displayedTrackIds.delete(duplicateCard.dataset.trackId);
+                duplicateCard.remove();
+            }
+        });
+
+        if (
+            mergeData.representative_event &&
+            primaryCard &&
+            primaryCard.dataset.trackId !== String(mergeData.representative_event.track_id)
+        ) {
+            const wasSelected = primaryCard.classList.contains("selected");
+            displayedTrackIds.delete(primaryCard.dataset.trackId);
+            primaryCard.remove();
+            renderNewTrackEvents([mergeData.representative_event]);
+            primaryCard = document.querySelector(
+                '.new-track-event[data-identity-group-id="' + primaryGroupId + '"]'
+            );
+            if (wasSelected && primaryCard) {
+                primaryCard.classList.add("selected");
+                primaryCard.dataset.selected = "true";
+            }
         }
 
         const container = document.getElementById("new-track-events");
@@ -163,13 +193,16 @@
                     body: formData,
                 });
                 const data = await response.json();
-                if (!response.ok || !data.success) {
-                    throw new Error(data.error || "Could not undo grouping.");
-                }
-                if (data.restored_event) {
-                    renderNewTrackEvents([data.restored_event]);
-                }
-                renderManualGroupingSuggestions(data.remaining_suggestions);
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.error || "Could not undo grouping.");
+                    }
+                    if (data.report) {
+                        renderResults(data);
+                    }
+                    if (data.restored_event) {
+                        renderNewTrackEvents([data.restored_event]);
+                    }
+                    renderManualGroupingSuggestions(data.remaining_suggestions);
                 if (window.clearMainTrackedVideoGroups) {
                     window.clearMainTrackedVideoGroups();
                 }
@@ -737,6 +770,12 @@
                     if (!response.ok || !data.success) {
                         throw new Error(data.error || "Could not group images.");
                     }
+                    // Refresh statistics first. The thumbnail/video UI below
+                    // is independent, so an issue there must not leave the
+                    // Tracking Report showing the pre-merge rows.
+                    if (data.report) {
+                        renderResults(data);
+                    }
                     renderManualGroupingSuggestions(data.remaining_suggestions);
                     if (window.applyManualGroupMerge) {
                         window.applyManualGroupMerge(data);
@@ -802,9 +841,9 @@
         document.getElementById("track-selected-people");
 
     if (trackSelectedPeopleBtn) {
-        trackSelectedPeopleBtn.addEventListener("click", function () {
+        trackSelectedPeopleBtn.addEventListener("click", async function () {
             const selectedCards = getSelectedCards();
-            const identityGroupIds = selectedCards
+            let identityGroupIds = selectedCards
                 .map(function (card) {
                     return Number(card.dataset.identityGroupId);
                 })
@@ -829,20 +868,72 @@
                 return;
             }
 
-            // Keep the existing generated-video experience in the lightbox.
-            // The main page retains the original processed video and later
-            // receives only the selected groups' upper-half crops.
-            const firstImage = selectedCards[0].querySelector("img");
-            if (firstImage) {
-                firstImage.click();
-            }
+            const reportId = reportIds[0];
+            const config = document.getElementById("app-config");
+            const csrfToken = document.querySelector("[name=csrfmiddlewaretoken]");
 
-            if (window.generateSeparateVideo) {
-                window.generateSeparateVideo(
-                    identityGroupIds,
-                    reportIds[0],
-                    trackSelectedPeopleBtn
+            trackSelectedPeopleBtn.disabled = true;
+            try {
+                if (identityGroupIds.length > 1) {
+                    const formData = new FormData();
+                    formData.append("report_id", reportId);
+                    formData.append(
+                        "identity_group_ids",
+                        JSON.stringify(identityGroupIds)
+                    );
+
+                    const response = await fetch(config.dataset.selectedGroupUrl, {
+                        method: "POST",
+                        headers: {
+                            "X-CSRFToken": csrfToken ? csrfToken.value : "",
+                            "X-Requested-With": "XMLHttpRequest",
+                        },
+                        body: formData,
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.error || "Could not group selected people.");
+                    }
+                    if (data.report) {
+                        renderResults(data);
+                    }
+                    if (window.applyManualGroupMerge) {
+                        window.applyManualGroupMerge(data);
+                    }
+                    renderManualGroupingSuggestions(data.remaining_suggestions);
+                    if (window.showTrackedVideoGroupsOnPage) {
+                        window.showTrackedVideoGroupsOnPage(data.identity_groups);
+                    }
+                    identityGroupIds = [Number(data.identity_group_id)];
+                }
+
+                // Keep the existing generated-video experience in the lightbox.
+                // The main page retains the original processed video and later
+                // receives only the selected groups' upper-half crops.
+                const activeCard = document.querySelector(
+                    '.new-track-event[data-identity-group-id="' +
+                    String(identityGroupIds[0]) +
+                    '"]'
                 );
+                const firstImage = activeCard
+                    ? activeCard.querySelector("img")
+                    : selectedCards[0].querySelector("img");
+                if (firstImage) {
+                    firstImage.click();
+                }
+
+                if (window.generateSeparateVideo) {
+                    window.generateSeparateVideo(
+                        identityGroupIds,
+                        reportId,
+                        trackSelectedPeopleBtn
+                    );
+                } else {
+                    updateSelectedPeopleUI();
+                }
+            } catch (error) {
+                alert(error.message || "Could not track selected people.");
+                updateSelectedPeopleUI();
             }
         });
     }
@@ -977,14 +1068,16 @@
                         '<div class="table-wrap"><table>';
 
                     html +=
-                        '<tr>' +
+                        '<thead><tr>' +
                         '<th>Track ID</th>' +
                         '<th>First Seen (sec)</th>' +
                         '<th>Last Seen (sec)</th>' +
                         '<th>Visible Duration (sec)</th>' +
                         '<th>Frames Seen</th>' +
-                        '</tr>';
+                        '</tr></thead>';
 
+                    html +=
+                        '<tbody id="tracking-report-body">';
 
                     data.report.reports.forEach(
                         function (item) {
@@ -1022,7 +1115,7 @@
 
 
                     html +=
-                        '</table></div>';
+                        '</tbody></table></div>';
 
                 } else {
 

@@ -21,7 +21,7 @@ class PersonTracker:
     def __init__(
         self,
         fps: float,
-        tracker_type: str = "deepsort",
+        tracker_type: str = "bytetrack",
     ):  
 
         self.tracker_type = tracker_type.lower()
@@ -56,7 +56,7 @@ class PersonTracker:
                 
             # )
             self.tracker = DeepSort(
-                max_age=int(round(fps * 4)),
+                max_age=int(round(fps * 2)),
                 n_init=3,
                 max_cosine_distance=0.35,
                 nn_budget=100,

@@ -1203,6 +1203,7 @@
     data-progress-url="{% url 'get_progress' %}"
     data-image-url="{% url 'detect_image' %}"
     data-separate-video-url="{% url 'generate_separate_video' %}"
+    data-selected-group-url="{% url 'merge_selected_identity_groups' %}"
     data-manual-group-url="{% url 'merge_manual_identity_groups' %}"
     data-undo-manual-group-url="{% url 'undo_manual_identity_group_merge' %}"
     data-dismiss-manual-suggestion-url="{% url 'dismiss_manual_grouping_suggestion' %}"
@@ -1720,7 +1721,7 @@
 
 <script src="{% static 'tracker/js/mode-toggle.js' %}"></script>
 <script src="{% static 'tracker/js/image.js' %}"></script>
-<script src="{% static 'tracker/js/video.js' %}?v=reid-live-matches-1"></script>
+<script src="{% static 'tracker/js/video.js' %}?v=selected-permanent-merge-1"></script>
 <script src="{% static 'tracker/js/lightbox.js' %}"></script>
 <script src="{% static 'tracker/js/track-person.js' %}"></script>
 

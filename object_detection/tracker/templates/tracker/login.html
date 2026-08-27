@@ -1,0 +1,71 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in — Tracker</title>
+  <link rel="stylesheet" href="{% static 'tracker/css/auth.css' %}">
+</head>
+<body class="auth-body">
+  <div class="auth-shell">
+
+    <section class="auth-hud">
+      <div class="auth-hud__grid"></div>
+      <div>
+        <p class="auth-hud__eyebrow">// tracker access</p>
+        <h1 class="auth-hud__title">Identify<br><span>&amp; track.</span></h1>
+        <p class="auth-hud__sub">Sign in to review detections, tracked events and reports across your uploads.</p>
+      </div>
+
+      <div class="reticle">
+        <span class="reticle__label">subject_01</span>
+        <span class="reticle__corner reticle__corner--tl"></span>
+        <span class="reticle__corner reticle__corner--tr"></span>
+        <span class="reticle__corner reticle__corner--bl"></span>
+        <span class="reticle__corner reticle__corner--br"></span>
+        <span class="reticle__scanline"></span>
+      </div>
+
+      <div class="auth-hud__footer">
+        <span>STATUS: <span class="dot">AWAITING AUTH</span></span>
+        <span>SESSION: JWT / HTTPONLY</span>
+      </div>
+    </section>
+
+    <section class="auth-formwrap">
+      <div class="auth-card">
+        <p class="auth-card__tag">Welcome back</p>
+        <h1>Sign in</h1>
+
+        <div class="auth-banner" data-auth-banner></div>
+
+        <form id="login-form" novalidate>
+          <div class="field">
+            <label for="username">Username</label>
+            <div class="field__input-wrap">
+              <input type="text" id="username" name="username" autocomplete="username" required>
+            </div>
+            <div class="field__error" data-error-for="username"></div>
+          </div>
+
+          <div class="field">
+            <label for="password">Password</label>
+            <div class="field__input-wrap">
+              <input type="password" id="password" name="password" autocomplete="current-password" required>
+            </div>
+            <div class="field__error" data-error-for="password"></div>
+          </div>
+
+          <button type="submit" class="auth-submit" data-submit data-idle-label="Sign in" data-loading-label="Signing in…">Sign in</button>
+        </form>
+
+        <p class="auth-switch">No account yet? <a href="{% url 'register_page' %}">Register</a></p>
+      </div>
+    </section>
+
+  </div>
+
+  <script src="{% static 'tracker/js/auth.js' %}"></script>
+</body>
+</html>

@@ -20,6 +20,7 @@ from .services.reporting.report_generator import ReportGenerator
 from .models import (
     ManualGroupingSuggestion,
     ManualIdentityGroupMerge,
+    PersonIdentityGroup,
     PersonTrackStats,
     TrackFrameEvent,
     TrackingReport,
@@ -33,9 +34,22 @@ from .services.reporting.report_generator import ReportGenerator
 from .services.video.video_paths import get_next_video_version, get_video_directories
 from .services.reidentification import PersonSimilarityIndex
 
+from django.shortcuts import render
+from .services.auth.decorators import jwt_login_required
+
+
 
 _processing_lock = threading.Lock()
 _is_processing = False
+
+
+
+def login_page(request):
+    return render(request, 'tracker/login.html')
+
+
+def register_page(request):
+    return render(request, 'tracker/register.html')
 
 
 def is_ajax(request):
@@ -517,7 +531,7 @@ def _run_processing(
         with _processing_lock:
             _is_processing = False
 
-
+@jwt_login_required
 def upload_video(request):
     global _is_processing
 
@@ -886,6 +900,12 @@ def merge_manual_identity_groups(request):
                 status=ManualGroupingSuggestion.Status.GROUPED,
             )
 
+            serialized_report = ReportGenerator.serialize_tracking_report(
+                suggestion.report
+            )
+            if progress.get("report_id") == report_id:
+                progress["report"] = serialized_report
+
             return JsonResponse(
                 {
                     "success": True,
@@ -894,6 +914,8 @@ def merge_manual_identity_groups(request):
                     "duplicate_identity_group_id": duplicate_group.group_key,
                     "representative_track_id": primary_group.representative_track_id,
                     "manual_merge_id": merge_history.id,
+                    "output_video": suggestion.report.output_video,
+                    "report": serialized_report,
                     "identity_groups": _serialize_identity_groups_for_video(
                         suggestion.report,
                         [primary_group.group_key],
@@ -971,9 +993,17 @@ def undo_manual_identity_group_merge(request):
             merge.undone_at = timezone.now()
             merge.save(update_fields=["is_undone", "undone_at"])
 
+            serialized_report = ReportGenerator.serialize_tracking_report(
+                merge.report
+            )
+            if progress.get("report_id") == report_id:
+                progress["report"] = serialized_report
+
             return JsonResponse(
                 {
                     "success": True,
+                    "output_video": merge.report.output_video,
+                    "report": serialized_report,
                     "restored_event": _serialize_representative_event(
                         merge.report, duplicate_group
                     ),
@@ -985,6 +1015,165 @@ def undo_manual_identity_group_merge(request):
     except ManualIdentityGroupMerge.DoesNotExist:
         return JsonResponse(
             {"success": False, "error": "This manual merge is no longer available."},
+            status=404,
+        )
+
+
+def merge_selected_identity_groups(request):
+    """Permanently merge identity groups selected from the main thumbnails."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"success": False, "error": "Method not allowed."},
+            status=405,
+        )
+
+    try:
+        report_id = int(request.POST.get("report_id"))
+        identity_group_ids = sorted({
+            int(group_id)
+            for group_id in json.loads(request.POST.get("identity_group_ids"))
+        })
+        if len(identity_group_ids) < 2:
+            raise ValueError
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return JsonResponse(
+            {"success": False, "error": "Select at least two valid groups."},
+            status=400,
+        )
+
+    try:
+        with transaction.atomic():
+            report = TrackingReport.objects.select_for_update().get(id=report_id)
+            groups = list(
+                PersonIdentityGroup.objects.select_for_update()
+                .filter(
+                    report=report,
+                    group_key__in=identity_group_ids,
+                    is_active=True,
+                )
+                .prefetch_related("tracks")
+            )
+            found_group_ids = {group.group_key for group in groups}
+            missing_group_ids = set(identity_group_ids) - found_group_ids
+            if missing_group_ids:
+                missing_ids = ", ".join(
+                    str(group_id) for group_id in sorted(missing_group_ids)
+                )
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": f"Identity group(s) not found: {missing_ids}.",
+                    },
+                    status=404,
+                )
+
+            group_track_ids = {
+                group.id: [
+                    track.track_id
+                    for track in group.tracks.all()
+                ]
+                for group in groups
+            }
+            groups = [
+                group for group in groups
+                if group_track_ids.get(group.id)
+            ]
+            if len(groups) < 2:
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "At least two selected groups must contain tracks.",
+                    },
+                    status=400,
+                )
+
+            primary_group = min(
+                groups,
+                key=lambda group: min(group_track_ids[group.id]),
+            )
+            representative_track_id = min(
+                track_id
+                for track_ids in group_track_ids.values()
+                for track_id in track_ids
+            )
+            duplicate_groups = [
+                group for group in groups
+                if group.id != primary_group.id
+            ]
+            duplicate_group_ids = [group.group_key for group in duplicate_groups]
+
+            affected_suggestions = list(
+                ManualGroupingSuggestion.objects.filter(
+                    report=report,
+                    status=ManualGroupingSuggestion.Status.PENDING,
+                )
+                .filter(
+                    Q(first_group__in=groups) | Q(second_group__in=groups)
+                )
+                .values_list("id", flat=True)
+            )
+
+            merge_history_ids = []
+            for duplicate_group in duplicate_groups:
+                moved_track_ids = group_track_ids[duplicate_group.id]
+                merge_history = ManualIdentityGroupMerge.objects.create(
+                    report=report,
+                    source_suggestion=None,
+                    primary_group=primary_group,
+                    duplicate_group=duplicate_group,
+                    moved_track_ids=json.dumps(moved_track_ids),
+                    resolved_suggestion_ids=json.dumps(affected_suggestions),
+                )
+                merge_history_ids.append(merge_history.id)
+                PersonTrackStats.objects.filter(
+                    report=report,
+                    track_id__in=moved_track_ids,
+                ).update(identity_group=primary_group)
+                duplicate_group.is_active = False
+                duplicate_group.merged_into = primary_group
+                duplicate_group.save(update_fields=["is_active", "merged_into"])
+
+            if primary_group.representative_track_id != representative_track_id:
+                primary_group.representative_track_id = representative_track_id
+                primary_group.save(update_fields=["representative_track_id"])
+
+            ManualGroupingSuggestion.objects.filter(
+                id__in=affected_suggestions,
+            ).update(
+                is_resolved=True,
+                status=ManualGroupingSuggestion.Status.GROUPED,
+            )
+
+            serialized_report = ReportGenerator.serialize_tracking_report(report)
+            if progress.get("report_id") == report_id:
+                progress["report"] = serialized_report
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "report_id": report_id,
+                    "identity_group_id": primary_group.group_key,
+                    "duplicate_identity_group_ids": duplicate_group_ids,
+                    "representative_track_id": representative_track_id,
+                    "manual_merge_ids": merge_history_ids,
+                    "output_video": report.output_video,
+                    "report": serialized_report,
+                    "representative_event": _serialize_representative_event(
+                        report,
+                        primary_group,
+                    ),
+                    "identity_groups": _serialize_identity_groups_for_video(
+                        report,
+                        [primary_group.group_key],
+                    ),
+                    "remaining_suggestions": _serialize_manual_grouping_suggestions(
+                        report
+                    ),
+                }
+            )
+    except TrackingReport.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "error": "Report not found."},
             status=404,
         )
 
