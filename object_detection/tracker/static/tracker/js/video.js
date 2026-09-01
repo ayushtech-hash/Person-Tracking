@@ -426,21 +426,9 @@
                 "new-track-event-meta";
 
 
-            const timeLabel =
-                (
-                    event.time_sec === undefined ||
-                    event.time_sec === null
-                )
-                    ? ""
-                    : " • " +
-                      event.time_sec +
-                      " sec";
-
-
             meta.textContent =
                 "Frame " +
-                event.frame +
-                timeLabel;
+                event.frame;
 
 
             info.appendChild(title);
@@ -454,7 +442,9 @@
                 "new-track-badge";
 
             badge.textContent =
-                "NEW ID";
+                event.time_sec === undefined || event.time_sec === null
+                    ? ""
+                    : event.time_sec + " sec";
 
 
             header.appendChild(info);
@@ -747,7 +737,7 @@
             const groupButton = document.createElement("button");
             groupButton.type = "button";
             groupButton.className = "manual-grouping-action";
-            groupButton.textContent = "Group Images";
+            groupButton.textContent = "Merge Images";
             groupButton.addEventListener("click", async function () {
                 const config = document.getElementById("app-config");
                 const csrfToken = document.querySelector("[name=csrfmiddlewaretoken]");
@@ -786,7 +776,7 @@
                     }
                 } catch (error) {
                     groupButton.disabled = false;
-                    groupButton.textContent = "Group Images";
+                    groupButton.textContent = "Merge Images";
                     alert(error.message || "Could not group images.");
                 }
             });

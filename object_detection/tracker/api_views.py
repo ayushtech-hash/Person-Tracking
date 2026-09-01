@@ -32,6 +32,7 @@ from .services.auth.tokens import clear_auth_cookies, set_auth_cookies
 @method_decorator(csrf_exempt, name='dispatch')
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -56,6 +57,8 @@ class RegisterAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
+
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -75,6 +78,8 @@ class LoginAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class RefreshAPIView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
+
 
     def post(self, request):
         raw_refresh = request.COOKIES.get(settings.AUTH_COOKIE_REFRESH)
@@ -93,6 +98,8 @@ class RefreshAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class LogoutAPIView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
+
 
     def post(self, request):
         raw_refresh = request.COOKIES.get(settings.AUTH_COOKIE_REFRESH)

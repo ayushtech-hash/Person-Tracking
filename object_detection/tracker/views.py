@@ -367,6 +367,15 @@ def update_track_frame(
     for track in tracked:
 
         track_id = int(track.track_id)
+        x1, y1, x2, y2 = map(int, track.bbox)
+
+        # Match the coordinates to the saved frame, including clipping boxes
+        # that lie partly outside its edges.
+        frame_height, frame_width = frame.shape[:2]
+        x1 = max(0, min(x1, frame_width - 1))
+        y1 = max(0, min(y1, frame_height - 1))
+        x2 = max(x1 + 1, min(x2, frame_width))
+        y2 = max(y1 + 1, min(y2, frame_height))
 
         # Find/create stats row for this track
         track_stats, created = (
@@ -389,6 +398,10 @@ def update_track_frame(
             defaults={
                 "timestamp": frame_time,
                 "full_frame_url": full_frame_url,
+                "bbox_x1": x1,
+                "bbox_y1": y1,
+                "bbox_x2": x2,
+                "bbox_y2": y2,
             },
         )
 
@@ -1316,7 +1329,10 @@ def generate_separate_video(request):
         # CHECK DATABASE FIRST
         # ---------------------------------------------------------
 
-        if track_stats.separate_video_url:
+        if (
+            track_stats.separate_video_url
+            and "_highlighted.mp4" in track_stats.separate_video_url
+        ):
 
             print(
                 f"[SEPARATE VIDEO] "

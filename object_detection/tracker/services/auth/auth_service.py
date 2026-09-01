@@ -45,9 +45,16 @@ def register_user(username, email, password, password_confirm):
 
 
 def authenticate_user(username, password):
+    print("AUTH DEBUG username:", repr(username))
+
     user = authenticate(username=username, password=password)
+
+    print("AUTH DEBUG result:", user)
+    
     if user is None:
         raise AuthError('Invalid username or password.')
+
     if not user.is_active:
         raise AuthError('This account has been disabled.')
+
     return user

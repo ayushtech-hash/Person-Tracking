@@ -18,7 +18,9 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.shortcuts import redirect
 from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+
+from .tokens import set_auth_cookies
 
 
 def jwt_login_required(view_func):
@@ -31,6 +33,17 @@ def jwt_login_required(view_func):
                 token = AccessToken(raw_token)
                 request.user = User.objects.get(pk=token['user_id'])
                 return view_func(request, *args, **kwargs)
+            except (TokenError, User.DoesNotExist):
+                pass
+
+        raw_refresh = request.COOKIES.get(settings.AUTH_COOKIE_REFRESH)
+        if raw_refresh:
+            try:
+                refresh = RefreshToken(raw_refresh)
+                access = refresh.access_token
+                request.user = User.objects.get(pk=access['user_id'])
+                response = view_func(request, *args, **kwargs)
+                return set_auth_cookies(response, access)
             except (TokenError, User.DoesNotExist):
                 pass
 

@@ -55,6 +55,34 @@ async function postJSON(path, body) {
   return { ok: res.ok, status: res.status, data };
 }
 
+async function restoreExistingSession() {
+  const form = qs('#login-form');
+  if (!form) return false;
+
+  try {
+    const me = await fetch(`${AUTH_API_BASE}/me/`, {
+      credentials: 'include',
+    });
+    if (me.ok) {
+      window.location.replace(nextUrl());
+      return true;
+    }
+
+    const refresh = await fetch(`${AUTH_API_BASE}/refresh/`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (refresh.ok) {
+      window.location.replace(nextUrl());
+      return true;
+    }
+  } catch (e) {
+    /* Stay on the login form and let the user sign in manually. */
+  }
+
+  return false;
+}
+
 function nextUrl() {
   const params = new URLSearchParams(window.location.search);
   return params.get('next') || '/';
@@ -75,14 +103,19 @@ function initLoginForm() {
       password: form.password.value,
     };
 
-    const { ok, data } = await postJSON('/login/', payload);
+    try {
+      const { ok, data } = await postJSON('/login/', payload);
 
-    if (ok) {
-      window.location.href = nextUrl();
-      return;
+      if (ok) {
+        window.location.href = nextUrl();
+        return;
+      }
+
+      showBanner(form, data.detail || 'Login failed. Check your credentials and try again.');
+    } catch (error) {
+      showBanner(form, 'Could not reach the login service. Please try again.');
     }
 
-    showBanner(form, data.detail || 'Login failed. Check your credentials and try again.');
     setLoading(form, false);
   });
 }
@@ -104,19 +137,23 @@ function initRegisterForm() {
       password_confirm: form.password_confirm.value,
     };
 
-    const { ok, data } = await postJSON('/register/', payload);
+    try {
+      const { ok, data } = await postJSON('/register/', payload);
 
-    if (ok) {
-      window.location.href = '/';
-      return;
-    }
+      if (ok) {
+        window.location.href = '/';
+        return;
+      }
 
-    if (data.field) {
-      setFieldError(data.field, data.detail);
-    } else if (data.username) {
-      setFieldError('username', Array.isArray(data.username) ? data.username[0] : data.username);
-    } else {
-      showBanner(form, data.detail || 'Registration failed. Please check the form and try again.');
+      if (data.field) {
+        setFieldError(data.field, data.detail);
+      } else if (data.username) {
+        setFieldError('username', Array.isArray(data.username) ? data.username[0] : data.username);
+      } else {
+        showBanner(form, data.detail || 'Registration failed. Please check the form and try again.');
+      }
+    } catch (error) {
+      showBanner(form, 'Could not reach the registration service. Please try again.');
     }
     setLoading(form, false);
   });
@@ -125,4 +162,5 @@ function initRegisterForm() {
 document.addEventListener('DOMContentLoaded', () => {
   initLoginForm();
   initRegisterForm();
+  restoreExistingSession();
 });

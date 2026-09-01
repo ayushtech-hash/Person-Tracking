@@ -14,7 +14,7 @@ class PersonDetector:
         """
         self.model = YOLO(model_path)
 
-    def detect(self, frame, conf: float = 0.30, iou: float = 0.50):
+    def detect(self, frame, conf: float = 0.30, iou: float = 0.60):
         """
         Detect persons in a frame.
 

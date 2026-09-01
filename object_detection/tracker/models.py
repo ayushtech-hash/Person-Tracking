@@ -198,6 +198,12 @@ class TrackFrameEvent(models.Model):
     full_frame_url = models.CharField(max_length=1000,blank=True,)
     cropped_image_url = models.CharField(max_length=1000,blank=True,)
     thumbnail_url = models.CharField(max_length=1000,blank=True,)
+    # Coordinates are kept with the saved full frame so a generated
+    # selected-person video can identify the person within that frame.
+    bbox_x1 = models.IntegerField(null=True, blank=True)
+    bbox_y1 = models.IntegerField(null=True, blank=True)
+    bbox_x2 = models.IntegerField(null=True, blank=True)
+    bbox_y2 = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
