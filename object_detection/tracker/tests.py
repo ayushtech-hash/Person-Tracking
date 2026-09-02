@@ -23,6 +23,12 @@ class AuthenticationRoutingTests(TestCase):
 
         self.assertRedirects(response, '/login/?next=/', fetch_redirect_response=False)
 
+    def test_progress_returns_json_401_for_anonymous_users(self):
+        response = self.client.get('/get_progress/?job_id=test-job')
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "Authentication required.")
+
 
 class PersonSimilarityIndexTests(TestCase):
     def _event(self, track_id, frame):

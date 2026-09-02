@@ -4,6 +4,7 @@ from django.http import multipartparser
 import os
 import threading
 import time
+import uuid
 import cv2
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
@@ -15,7 +16,14 @@ from django.shortcuts import render
 from .forms import ImageUploadForm, VideoUploadForm
 from .services.detection.image_processor import ImageProcessor
 from .services.processor import VideoProcessor
-from .services.reporting.progress import progress
+from .services.reporting.progress import (
+    append_new_track_event,
+    finish_user_job,
+    get_job_progress,
+    start_user_job,
+    update_job_progress,
+    update_report_for_report_id,
+)
 from .services.reporting.report_generator import ReportGenerator
 from .models import (
     ManualGroupingSuggestion,
@@ -26,21 +34,11 @@ from .models import (
     TrackingReport,
 )
 
-from .services.detection.image_processor import ImageProcessor
-from .services.processor import VideoProcessor
 from .services.video.seperate_video import SeparateVideoGenerator
-from .services.reporting.progress import progress
-from .services.reporting.report_generator import ReportGenerator
 from .services.video.video_paths import get_next_video_version, get_video_directories
 from .services.reidentification import PersonSimilarityIndex
 
-from django.shortcuts import render
-from .services.auth.decorators import jwt_login_required
-
-
-
-_processing_lock = threading.Lock()
-_is_processing = False
+from .services.auth.decorators import jwt_api_login_required, jwt_login_required
 
 
 
@@ -56,15 +54,19 @@ def is_ajax(request):
     return request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
 
-def update_progress(current_frame, total_frames, status="Processing"):
+def update_progress(job_id, current_frame, total_frames, status="Processing"):
     percent = int((current_frame / total_frames) * 100) if total_frames else 0
 
-    progress["current_frame"] = current_frame
-    progress["total_frames"] = total_frames
-    progress["progress"] = percent
-    progress["status"] = status
+    update_job_progress(
+        job_id,
+        current_frame=current_frame,
+        total_frames=total_frames,
+        progress=percent,
+        status=status,
+    )
 
 def update_track_event(
+    job_id,
     frame,
     original_frame,
     bbox,
@@ -296,10 +298,7 @@ def update_track_event(
             event,
         )
 
-    if "new_track_events" not in progress:
-        progress["new_track_events"] = []
-
-    progress["new_track_events"].append(event)
+    append_new_track_event(job_id, event)
 
 
 def update_track_frame(
@@ -406,22 +405,9 @@ def update_track_frame(
         )
 
 
-def _reset_progress():
-    progress["current_frame"] = 0
-    progress["total_frames"] = 0
-    progress["progress"] = 0
-    progress["processing_time"] = None
-    progress["status"] = "Processing"
-    progress["output_video"] = None
-    progress["report"] = None
-    progress["report_id"] = None
-    progress["message"] = None
-    progress["error"] = None
-    progress["new_track_events"] = []
-    progress["manual_grouping_suggestions"] = []
-
-
 def _run_processing(
+    job_id,
+    user_id,
     input_path,
     output_path,
     output_filename,
@@ -433,8 +419,6 @@ def _run_processing(
     video_version,
 
 ):
-    global _is_processing
-
     processing_start = time.time()
 
     close_old_connections()
@@ -446,6 +430,7 @@ def _run_processing(
 
         def track_event_handler(**event_data):
             update_track_event(
+                job_id=job_id,
                 **event_data,
                 similarity_index=similarity_index,
             )
@@ -471,7 +456,10 @@ def _run_processing(
             start_time=start_time,
             end_time=end_time,
             selected_track_id=track_id,
-            progress_callback=update_progress,
+            progress_callback=(
+                lambda current_frame, total_frames, status="Processing":
+                    update_progress(job_id, current_frame, total_frames, status)
+            ),
             track_event_callback=track_event_handler,
             track_frame_callback=track_frame_handler,
             video_version=video_version,
@@ -482,9 +470,12 @@ def _run_processing(
 
         processing_time = processing_end - processing_start
 
-        progress["processing_time"] = round(
-            processing_time,
-            2
+        update_job_progress(
+            job_id,
+            processing_time=round(
+                processing_time,
+                2
+            ),
         )
 
         output_video_url = (
@@ -495,15 +486,16 @@ def _run_processing(
         
         input_video_url = f"/media/uploads/{input_filename}"
 
-        progress["output_video"] = output_video_url
+        update_job_progress(job_id, output_video=output_video_url)
 
         if report:
+            current_progress = get_job_progress(job_id) or {}
             tracking_report = ReportGenerator.save_to_database(
             report_data=report,
             output_video_url=output_video_url,
             input_video_url=input_video_url,
             selected_track_id=track_id,
-            frame_events=progress.get("new_track_events",[]),
+            frame_events=current_progress.get("new_track_events",[]),
             # Resolve groups only after processing ends: a later upper-half
             # crop may have merged identities that initially looked separate.
             identity_groups=similarity_index.get_groups(),
@@ -519,114 +511,128 @@ def _run_processing(
             # Event cards are rendered while processing uses a temporary
             # report.  Replace that ID once the final report and its identity
             # groups have been persisted, before selection becomes available.
-            for event in progress.get("new_track_events", []):
+            for event in current_progress.get("new_track_events", []):
                 event["report_id"] = tracking_report.id
-            progress["report_id"] = tracking_report.id
-            progress["report"] = ReportGenerator.serialize_tracking_report(
-                tracking_report
+            update_job_progress(
+                job_id,
+                new_track_events=current_progress.get("new_track_events", []),
+                report_id=tracking_report.id,
+                report=ReportGenerator.serialize_tracking_report(
+                    tracking_report
+                ),
+                manual_grouping_suggestions=(
+                    _serialize_manual_grouping_suggestions(tracking_report)
+                ),
+                message=None,
             )
-            progress["manual_grouping_suggestions"] = (
-                _serialize_manual_grouping_suggestions(tracking_report)
-            )
-            progress["message"] = None
         else:
-            progress["report_id"] = None
-            progress["report"] = None
-            progress["message"] = "Track ID was not found."
-        progress["progress"] = 100
-        progress["status"] = "Completed"
+            update_job_progress(
+                job_id,
+                report_id=None,
+                report=None,
+                message="Track ID was not found.",
+            )
+        update_job_progress(job_id, progress=100, status="Completed")
         
     except Exception as exc:
-        progress["status"] = "Failed"
-        progress["error"] = str(exc)
+        update_job_progress(job_id, status="Failed", error=str(exc))
     finally:
         close_old_connections()
-        with _processing_lock:
-            _is_processing = False
+        finish_user_job(user_id, job_id)
 
 @jwt_login_required
 def upload_video(request):
-    global _is_processing
-
     if request.method == "POST":
         form = VideoUploadForm(request.POST, request.FILES)
 
         if form.is_valid():
-            with _processing_lock:
-                if _is_processing:
-                    if is_ajax(request):
-                        return JsonResponse(
-                            {
-                                "success": False,
-                                "error": "A video is already being processed.",
-                            },
-                            status=409,
-                        )
-                    return render(
-                        request,
-                        "tracker/upload.html",
+            user_id = request.user.id
+            job_id = str(uuid.uuid4())
+            if not start_user_job(user_id, job_id):
+                if is_ajax(request):
+                    return JsonResponse(
                         {
-                            "form": form,
-                            "image_form": ImageUploadForm(),
-                            "error": "A video is already being processed.",
+                            "success": False,
+                            "error": "You already have a video being processed.",
                         },
+                        status=409,
                     )
-                _is_processing = True
+                return render(
+                    request,
+                    "tracker/upload.html",
+                    {
+                        "form": form,
+                        "image_form": ImageUploadForm(),
+                        "error": "You already have a video being processed.",
+                    },
+                )
 
-            video = form.cleaned_data["video"]
-            start_time = form.cleaned_data["start_time"] or None
-            end_time = form.cleaned_data["end_time"] or None
-            track_id = form.cleaned_data["track_id"]
+            try:
+                video = form.cleaned_data["video"]
+                start_time = form.cleaned_data["start_time"] or None
+                end_time = form.cleaned_data["end_time"] or None
+                track_id = form.cleaned_data["track_id"]
 
-            # Create a new output workspace for this uploaded video
-            video_version = get_next_video_version()
+                # Create a new output workspace for this uploaded video
+                video_version = get_next_video_version()
 
-            video_dirs = get_video_directories(
-                video_version
-            )
+                video_dirs = get_video_directories(
+                    video_version
+                )
 
-            fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, "uploads"))
-            filename = fs.save(video.name, video)
+                fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, "uploads"))
+                filename = fs.save(video.name, video)
 
-            input_path = os.path.join(settings.MEDIA_ROOT, "uploads", filename)
-            output_filename = f"processed_{filename}"
+                input_path = os.path.join(settings.MEDIA_ROOT, "uploads", filename)
+                output_filename = f"processed_{filename}"
 
-            output_path = os.path.join(video_dirs["output_video"],output_filename,)
-            input_video_url = (f"/media/uploads/{filename}")
-            output_video_url = (
-                f"/media/videos/"
-                f"{video_version}/output_video/"
-                f"{output_filename}"
-            )
+                output_path = os.path.join(video_dirs["output_video"],output_filename,)
+                input_video_url = (f"/media/uploads/{filename}")
+                output_video_url = (
+                    f"/media/videos/"
+                    f"{video_version}/output_video/"
+                    f"{output_filename}"
+                )
 
-            tracking_report = ReportGenerator.create_processing_report(
-                output_video_url=output_video_url,
-                input_video_url=input_video_url,
-                selected_track_id=track_id,
-            )
-            _reset_progress()
+                tracking_report = ReportGenerator.create_processing_report(
+                    output_video_url=output_video_url,
+                    input_video_url=input_video_url,
+                    selected_track_id=track_id,
+                )
+                update_job_progress(job_id, report_id=tracking_report.id)
 
-            thread = threading.Thread(
-                target=_run_processing,
-                args=(
-                    input_path,
-                    output_path,
-                    output_filename,
-                    filename,
-                    start_time,
-                    end_time,
-                    track_id,
-                    tracking_report.id,
-                    video_version,       
+                thread = threading.Thread(
+                    target=_run_processing,
+                    args=(
+                        job_id,
+                        user_id,
+                        input_path,
+                        output_path,
+                        output_filename,
+                        filename,
+                        start_time,
+                        end_time,
+                        track_id,
+                        tracking_report.id,
+                        video_version,
 
 
-                ),
-                daemon=True,
-            )
-            thread.start()
+                    ),
+                    daemon=True,
+                )
+                thread.start()
+            except Exception:
+                finish_user_job(user_id, job_id)
+                raise
 
             if is_ajax(request):
-                return JsonResponse({"success": True, "status": "Processing"})
+                return JsonResponse(
+                    {
+                        "success": True,
+                        "status": "Processing",
+                        "job_id": job_id,
+                    }
+                )
 
             return render(
                 request,
@@ -695,8 +701,23 @@ def detect_image(request):
     )
 
 
+@jwt_api_login_required
 def get_progress(request):
-    return JsonResponse(progress)
+    job_id = request.GET.get("job_id")
+    if not job_id:
+        return JsonResponse(
+            {"success": False, "error": "Missing progress job id."},
+            status=400,
+        )
+
+    job_progress = get_job_progress(job_id, request.user.id)
+    if job_progress is None:
+        return JsonResponse(
+            {"success": False, "error": "Progress job was not found."},
+            status=404,
+        )
+
+    return JsonResponse(job_progress)
 
 
 def _serialize_manual_grouping_suggestions(report):
@@ -916,8 +937,7 @@ def merge_manual_identity_groups(request):
             serialized_report = ReportGenerator.serialize_tracking_report(
                 suggestion.report
             )
-            if progress.get("report_id") == report_id:
-                progress["report"] = serialized_report
+            update_report_for_report_id(report_id, serialized_report)
 
             return JsonResponse(
                 {
@@ -1009,8 +1029,7 @@ def undo_manual_identity_group_merge(request):
             serialized_report = ReportGenerator.serialize_tracking_report(
                 merge.report
             )
-            if progress.get("report_id") == report_id:
-                progress["report"] = serialized_report
+            update_report_for_report_id(report_id, serialized_report)
 
             return JsonResponse(
                 {
@@ -1158,8 +1177,7 @@ def merge_selected_identity_groups(request):
             )
 
             serialized_report = ReportGenerator.serialize_tracking_report(report)
-            if progress.get("report_id") == report_id:
-                progress["report"] = serialized_report
+            update_report_for_report_id(report_id, serialized_report)
 
             return JsonResponse(
                 {

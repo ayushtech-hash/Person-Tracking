@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.http import JsonResponse
 from django.shortcuts import redirect
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
@@ -23,7 +24,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from .tokens import set_auth_cookies
 
 
-def jwt_login_required(view_func):
+def _jwt_login_required(view_func, redirect_on_failure):
     @wraps(view_func)
     def wrapped(request, *args, **kwargs):
         raw_token = request.COOKIES.get(settings.AUTH_COOKIE_ACCESS)
@@ -47,6 +48,21 @@ def jwt_login_required(view_func):
             except (TokenError, User.DoesNotExist):
                 pass
 
+        if not redirect_on_failure:
+            return JsonResponse(
+                {"success": False, "error": "Authentication required."},
+                status=401,
+            )
+
         return redirect(f'/login/?next={quote(request.path)}')
 
     return wrapped
+
+
+def jwt_login_required(view_func):
+    return _jwt_login_required(view_func, redirect_on_failure=True)
+
+
+def jwt_api_login_required(view_func):
+    """Require JWT authentication without redirecting JSON clients to HTML."""
+    return _jwt_login_required(view_func, redirect_on_failure=False)

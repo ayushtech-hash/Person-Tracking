@@ -14,6 +14,9 @@
     const formError = document.getElementById("form-error");
 
     let pollInterval = null;
+    let activeJobId = null;
+
+    let refreshPromise = null;
     let lastProgress = {
         current_frame: 0,
         total_frames: 0
@@ -265,12 +268,43 @@
     }
 
 
-    async function fetchProgress() {
-        const config =
-            document.getElementById("app-config");
+    async function refreshAuthentication() {
+        if (!refreshPromise) {
+            refreshPromise = fetch(
+                "/api/auth/refresh/",
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                }
+            )
+                .then(function (response) {
+                    return response.ok;
+                })
+                .catch(function () {
+                    return false;
+                })
+                .finally(function () {
+                    refreshPromise = null;
+                });
+        }
 
-        const response =
-            await fetch(config.dataset.progressUrl);
+        return refreshPromise;
+    }
+
+
+    async function requestProgress(progressUrl) {
+        const response = await fetch(
+            progressUrl,
+            {
+                credentials: "same-origin",
+            }
+        );
+
+        if (response.status === 401) {
+            return {
+                authenticationRequired: true,
+            };
+        }
 
         const contentType =
             response.headers.get("content-type") || "";
@@ -281,7 +315,61 @@
             );
         }
 
-        return response.json();
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                data.error || "Could not retrieve processing progress."
+            );
+        }
+
+        return data;
+    }
+
+
+    async function fetchProgress() {
+        const config =
+            document.getElementById("app-config");
+
+        if (!activeJobId) {
+            throw new Error("Missing progress job id.");
+        }
+
+        const progressUrl =
+            new URL(
+                config.dataset.progressUrl,
+                window.location.origin
+            );
+
+        progressUrl.searchParams.set(
+            "job_id",
+            activeJobId
+        );
+
+        let progressData =
+            await requestProgress(progressUrl);
+
+        if (progressData.authenticationRequired) {
+            const refreshed =
+                await refreshAuthentication();
+
+            if (!refreshed) {
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
+            }
+
+            progressData =
+                await requestProgress(progressUrl);
+
+            if (progressData.authenticationRequired) {
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
+            }
+        }
+
+        return progressData;
     }
 
 
@@ -979,11 +1067,25 @@
                         }
 
                     } catch (err) {
-
                         console.error(
                             "Failed to fetch progress:",
                             err
                         );
+
+                        if (
+                            err.message ===
+                            "Your session has expired. Please log in again."
+                        ) {
+                            stopPolling();
+
+                            progressSection.style.display =
+                                "none";
+
+                            submitBtn.disabled =
+                                false;
+
+                            showFormError(err.message);
+                        }
                     }
 
                 },
@@ -1268,6 +1370,9 @@
             displayedSimilarityPairs =
                 new Set();
 
+            activeJobId =
+                null;
+
             const similarPeople = document.getElementById(
                 "similar-person-matches"
             );
@@ -1404,6 +1509,13 @@
                 }
 
 
+                if (!data.job_id) {
+
+                    throw new Error(
+                        "Server did not return a progress job id. Please refresh and try again."
+                    );
+                }
+
                 if (
                     window.setTrackPersonAvailable
                 ) {
@@ -1412,6 +1524,9 @@
                         false
                     );
                 }
+
+                activeJobId =
+                    data.job_id;
 
 
                 startPolling(
