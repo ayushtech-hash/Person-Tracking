@@ -1,7 +1,0 @@
-opencv-python
-ultralytics
-supervision
-numpy
-tqdm
-ffmpeg-python
-supervision
