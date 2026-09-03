@@ -54,6 +54,56 @@ class PersonIdentityGroup(models.Model):
         )
 
 
+class TrackSegment(models.Model):
+    """One continuous, appearance-consistent use of a raw tracker ID.
+
+    ByteTrack IDs are useful motion-track labels, but a single raw ID can
+    switch to another player.  A segment is the unit that must later be used
+    for identity grouping and separate-video generation.
+    """
+
+    report = models.ForeignKey(
+        TrackingReport,
+        on_delete=models.CASCADE,
+        related_name="track_segments",
+    )
+    identity_group = models.ForeignKey(
+        PersonIdentityGroup,
+        on_delete=models.SET_NULL,
+        related_name="segments",
+        null=True,
+        blank=True,
+    )
+    raw_track_id = models.IntegerField()
+    segment_number = models.PositiveIntegerField()
+    first_frame = models.PositiveIntegerField()
+    last_frame = models.PositiveIntegerField()
+    first_seen = models.FloatField()
+    last_seen = models.FloatField()
+    frames_seen = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    switch_reason = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["raw_track_id", "segment_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["report", "raw_track_id", "segment_number"],
+                name="unique_report_raw_track_segment",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["report", "raw_track_id"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"Track {self.raw_track_id} / segment {self.segment_number} "
+            f"(report #{self.report_id})"
+        )
+
+
 class PersonTrackStats(models.Model):
     report = models.ForeignKey(
         TrackingReport,
@@ -169,6 +219,7 @@ class ManualIdentityGroupMerge(models.Model):
         related_name="merges_absorbed",
     )
     moved_track_ids = models.TextField(default="[]")
+    moved_segment_ids = models.TextField(default="[]")
     # Suggestions resolved by this exact merge. Keeping the IDs makes Undo
     # precise: it must not reopen suggestions resolved by a later merge.
     resolved_suggestion_ids = models.TextField(default="[]")
@@ -191,6 +242,16 @@ class TrackFrameEvent(models.Model):
         PersonTrackStats,
         on_delete=models.CASCADE,
         related_name="frame_events",
+    )
+    # Nullable during the rollout so all existing reports retain their
+    # current raw-ID behaviour. New processing will populate this relation
+    # once TrackSegmentManager is introduced.
+    segment = models.ForeignKey(
+        TrackSegment,
+        on_delete=models.SET_NULL,
+        related_name="frame_events",
+        null=True,
+        blank=True,
     )
 
     frame_number = models.PositiveIntegerField()

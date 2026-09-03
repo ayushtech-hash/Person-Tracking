@@ -4,6 +4,7 @@ from tracker.models import (
     ManualGroupingSuggestion,
     PersonIdentityGroup,
     PersonTrackStats,
+    TrackSegment,
     TrackingReport,
     TrackFrameEvent,
 )
@@ -222,6 +223,7 @@ class ReportGenerator:
                 for group in tracking_report.identity_groups.all()
             }
             tracks_to_update = []
+            segments_to_update = []
 
             for group in identity_groups:
                 group_key = group.get("identity_group_id")
@@ -240,9 +242,49 @@ class ReportGenerator:
                     track_stat.identity_group = persisted_group
                     tracks_to_update.append(track_stat)
 
+                # Associate the identity group with only the segment that
+                # contains this exact snapshot. Assigning every segment of a
+                # raw ByteTrack ID would mix people after an ID switch.
+                for event in group.get("events", []):
+                    explicit_segment_id = event.get("segment_id")
+                    if explicit_segment_id is not None:
+                        segment = TrackSegment.objects.filter(
+                            report=tracking_report,
+                            id=int(explicit_segment_id),
+                        ).first()
+                        if segment is not None:
+                            segment.identity_group = persisted_group
+                            segments_to_update.append(segment)
+                        continue
+                    track_id = event.get("track_id")
+                    frame_number = event.get("frame")
+                    if track_id is None or frame_number is None:
+                        continue
+                    frame_event = (
+                        TrackFrameEvent.objects.filter(
+                            track__report=tracking_report,
+                            track__track_id=int(track_id),
+                            frame_number=int(frame_number),
+                            segment__isnull=False,
+                        )
+                        .select_related("segment")
+                        .first()
+                    )
+                    if frame_event is not None:
+                        frame_event.segment.identity_group = persisted_group
+                        segments_to_update.append(frame_event.segment)
+
             if tracks_to_update:
                 PersonTrackStats.objects.bulk_update(
                     tracks_to_update,
+                    ["identity_group"],
+                )
+            if segments_to_update:
+                unique_segments = {
+                    segment.id: segment for segment in segments_to_update
+                }
+                TrackSegment.objects.bulk_update(
+                    list(unique_segments.values()),
                     ["identity_group"],
                 )
 

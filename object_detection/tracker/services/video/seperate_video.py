@@ -278,28 +278,48 @@ class SeparateVideoGenerator:
         }
 
     @staticmethod
-    def generate_merged(report_id, track_ids, video_version, fps=25.0):
-        """Generate one video from tracks, globally ordered by video frame."""
-        track_ids = sorted({int(track_id) for track_id in track_ids})
-
-        if not track_ids:
-            raise ValueError("At least one track ID is required.")
+    def generate_merged(
+        report_id,
+        track_ids=None,
+        video_version=None,
+        fps=25.0,
+        segment_ids=None,
+    ):
+        """Generate one video from segments (or legacy raw IDs), in frame order."""
+        if segment_ids is not None:
+            segment_ids = sorted({int(segment_id) for segment_id in segment_ids})
+            if not segment_ids:
+                raise ValueError("At least one track segment is required.")
+            frame_events = list(
+                TrackFrameEvent.objects.filter(
+                    segment__report_id=report_id,
+                    segment_id__in=segment_ids,
+                ).select_related("track", "segment").order_by(
+                    "frame_number", "segment__raw_track_id", "id"
+                )
+            )
+            selection_label = "segments"
+            selection_suffix = "_".join(str(segment_id) for segment_id in segment_ids)
+        else:
+            track_ids = sorted({int(track_id) for track_id in (track_ids or [])})
+            if not track_ids:
+                raise ValueError("At least one track ID is required.")
+            frame_events = list(
+                TrackFrameEvent.objects.filter(
+                    track__report_id=report_id,
+                    track__track_id__in=track_ids,
+                ).select_related("track", "segment").order_by(
+                    "frame_number", "track__track_id", "id"
+                )
+            )
+            selection_label = "tracks"
+            selection_suffix = "_".join(str(track_id) for track_id in track_ids)
 
         # This must be one combined query, rather than an outer loop over
-        # track IDs: one selected identity group can contain many tracker IDs,
-        # and several selected groups must be interleaved in real video order.
-        frame_events = list(
-            TrackFrameEvent.objects.filter(
-                track__report_id=report_id,
-                track__track_id__in=track_ids,
-            ).select_related("track").order_by(
-                "frame_number",
-                "track__track_id",
-                "id",
-            )
-        )
+        # selected segments: several fragments must be interleaved in real
+        # video order. Raw IDs remain only as a legacy fallback.
         if not frame_events:
-            raise ValueError("No frames were found for the selected tracks.")
+            raise ValueError("No frames were found for the selected selection.")
         if not any(
             all(
                 value is not None
@@ -325,9 +345,8 @@ class SeparateVideoGenerator:
         )
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        track_id_suffix = "_".join(str(track_id) for track_id in track_ids)
         output_filename = (
-            f"report_{report_id}_tracks_{track_id_suffix}_highlighted.mp4"
+            f"report_{report_id}_{selection_label}_{selection_suffix}_highlighted.mp4"
         )
         output_path = output_dir / output_filename
 
@@ -342,6 +361,7 @@ class SeparateVideoGenerator:
             return {
                 "video_url": video_url,
                 "track_ids": track_ids,
+                "segment_ids": segment_ids,
                 "report_id": report_id,
                 "source": "filesystem",
             }
@@ -380,6 +400,7 @@ class SeparateVideoGenerator:
                 frames_written += 1
                 print(
                     f"[MERGED VIDEO] track_id={event.track.track_id} "
+                    f"segment_id={event.segment_id} "
                     f"frame_number={event.frame_number} written"
                 )
         finally:
@@ -393,6 +414,7 @@ class SeparateVideoGenerator:
         return {
             "video_url": video_url,
             "track_ids": track_ids,
+            "segment_ids": segment_ids,
             "report_id": report_id,
             "frames": frames_written,
         }

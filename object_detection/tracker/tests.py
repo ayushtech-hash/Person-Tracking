@@ -11,7 +11,9 @@ from .services.reporting.report_generator import ReportGenerator
 from .models import (
     ManualGroupingSuggestion,
     ManualIdentityGroupMerge,
+    PersonIdentityGroup,
     PersonTrackStats,
+    TrackSegment,
     TrackFrameEvent,
     TrackingReport,
 )
@@ -31,6 +33,62 @@ class AuthenticationRoutingTests(TestCase):
 
 
 class PersonSimilarityIndexTests(TestCase):
+    def test_identity_group_video_uses_only_its_exact_track_segment(self):
+        """A raw ID reused after a switch must not contaminate another group."""
+        report = TrackingReport.objects.create(
+            output_video="/media/videos/v1/output_video/tracked.mp4",
+        )
+        person_b_group = PersonIdentityGroup.objects.create(
+            report=report, group_key=1, representative_track_id=6,
+        )
+        person_a_group = PersonIdentityGroup.objects.create(
+            report=report, group_key=2, representative_track_id=1,
+        )
+        raw_six = PersonTrackStats.objects.create(
+            report=report,
+            track_id=6,
+            first_seen=0.0,
+            last_seen=10.0,
+            visible_duration=10.0,
+            frames_seen=2,
+            # This legacy relation cannot distinguish the two people.
+            identity_group=person_b_group,
+        )
+        b_segment = TrackSegment.objects.create(
+            report=report, raw_track_id=6, segment_number=1,
+            first_frame=10, last_frame=10, first_seen=0.4, last_seen=0.4,
+            frames_seen=1, is_active=False, identity_group=person_b_group,
+        )
+        a_segment = TrackSegment.objects.create(
+            report=report, raw_track_id=6, segment_number=2,
+            first_frame=200, last_frame=200, first_seen=8.0, last_seen=8.0,
+            frames_seen=1, is_active=False, identity_group=person_a_group,
+        )
+        for frame_number, segment in ((10, b_segment), (200, a_segment)):
+            TrackFrameEvent.objects.create(
+                track=raw_six, segment=segment, frame_number=frame_number,
+                timestamp=frame_number / 25.0,
+                full_frame_url=f"/media/frames/{frame_number}.jpg",
+                bbox_x1=0, bbox_y1=0, bbox_x2=10, bbox_y2=20,
+            )
+
+        with patch(
+            "tracker.views.SeparateVideoGenerator.generate_merged",
+            return_value={"video_url": "/media/b.mp4", "frames": 1},
+        ) as generate_merged:
+            response = self.client.post(
+                reverse("generate_separate_video"),
+                {
+                    "report_id": report.id,
+                    "identity_group_ids": json.dumps([person_b_group.group_key]),
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertEqual(generate_merged.call_args.kwargs["segment_ids"], [b_segment.id])
+        self.assertNotIn(a_segment.id, generate_merged.call_args.kwargs["segment_ids"])
+
     def _event(self, track_id, frame):
         return {
             "track_id": track_id,

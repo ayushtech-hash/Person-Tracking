@@ -72,7 +72,11 @@
 
                 const caption = document.createElement("figcaption");
                 caption.textContent =
-                    "Track " + crop.track_id + " · frame " + crop.frame;
+                    "Track " + crop.track_id +
+                    (crop.segment_number
+                        ? " · segment " + crop.segment_number
+                        : "") +
+                    " · frame " + crop.frame;
 
                 cropItem.appendChild(image);
                 cropItem.appendChild(caption);

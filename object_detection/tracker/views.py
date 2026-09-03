@@ -31,12 +31,15 @@ from .models import (
     PersonIdentityGroup,
     PersonTrackStats,
     TrackFrameEvent,
+    TrackSegment,
     TrackingReport,
 )
 
 from .services.video.seperate_video import SeparateVideoGenerator
 from .services.video.video_paths import get_next_video_version, get_video_directories
 from .services.reidentification import PersonSimilarityIndex
+from .services.tracking.segment_manager import TrackSegmentManager
+from .services.identity.segment_validator import SegmentAppearanceValidator
 
 from .services.auth.decorators import jwt_api_login_required, jwt_login_required
 
@@ -76,6 +79,8 @@ def update_track_event(
     video_version,
     report_id,
     similarity_index=None,
+    segment_id=None,
+    segment_number=None,
 ):
     """
     Save a new-track event with three images:
@@ -274,6 +279,10 @@ def update_track_event(
 
     event = {
         "track_id": track_id,
+        # Raw IDs are retained for display, while this optional key makes a
+        # post-switch snapshot unambiguous to segment-aware persistence.
+        "segment_id": segment_id,
+        "segment_number": segment_number,
         "report_id": report_id,
 
         "frame": frame_number,
@@ -308,7 +317,11 @@ def update_track_frame(
     fps,
     report_id,
     video_version,
-    ):
+    segment_manager=None,
+    segment_validator=None,
+    appearance_frame=None,
+    segment_snapshot_callback=None,
+):
     """
     Save the processed full frame once and create a database
     event for every track visible in that frame.
@@ -390,8 +403,91 @@ def update_track_frame(
             )
         )
 
-        # Create frame event
-        TrackFrameEvent.objects.get_or_create(
+        segment = None
+        if segment_manager is not None:
+            segment = segment_manager.get_or_start_segment(
+                raw_track_id=track_id,
+                frame_number=frame_number,
+                timestamp=frame_time,
+            )
+
+        observation = None
+        if segment is not None and segment_validator is not None:
+            reid_source_frame = (
+                appearance_frame if appearance_frame is not None else frame
+            )
+            person_crop = reid_source_frame[y1:y2, x1:x2]
+            observation = segment_validator.observe(
+                segment=segment,
+                crop_bgr=person_crop,
+                frame_number=frame_number,
+            )
+            if observation.status == "switch":
+                print(
+                    "[ID SWITCH APPEARANCE] "
+                    f"raw_id={track_id} "
+                    f"current_segment={segment.segment_number} "
+                    f"frame={frame_number} "
+                    f"similarity={observation.similarity:.4f}"
+                )
+                previous_segment, segment = segment_manager.split_segment(
+                    raw_track_id=track_id,
+                    frame_number=frame_number,
+                    timestamp=frame_time,
+                    reason="appearance_switch",
+                )
+                segment_manager.move_events_to_segment(
+                    previous_segment=previous_segment,
+                    new_segment=segment,
+                    event_ids=segment_validator.take_pending_event_ids(
+                        previous_segment
+                    ),
+                )
+                segment_validator.start_replacement_segment(
+                    previous_segment=previous_segment,
+                    new_segment=segment,
+                    embedding=observation.embedding,
+                )
+                if segment_snapshot_callback is not None:
+                    snapshot_frame = frame.copy()
+                    cv2.rectangle(
+                        snapshot_frame,
+                        (x1, y1),
+                        (x2, y2),
+                        (0, 0, 0),
+                        4,
+                    )
+                    cv2.putText(
+                        snapshot_frame,
+                        f"NEW SEGMENT: {track_id}-{segment.segment_number}",
+                        (x1, max(30, y1 - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0, 0, 0),
+                        3,
+                        cv2.LINE_AA,
+                    )
+                    segment_snapshot_callback(
+                        frame=snapshot_frame,
+                        original_frame=(
+                            appearance_frame
+                            if appearance_frame is not None
+                            else frame
+                        ),
+                        bbox=(x1, y1, x2, y2),
+                        track_id=track_id,
+                        segment_id=segment.id,
+                        segment_number=segment.segment_number,
+                        frame_number=frame_number,
+                        fps=fps,
+                        video_version=video_version,
+                        report_id=report_id,
+                    )
+
+        # Create one frame event for the raw track.  The raw track relation is
+        # retained during the migration; the segment relation is the new,
+        # unambiguous identity-safe unit.
+        frame_event, created = TrackFrameEvent.objects.get_or_create(
             track=track_stats,
             frame_number=frame_number,
             defaults={
@@ -401,8 +497,27 @@ def update_track_frame(
                 "bbox_y1": y1,
                 "bbox_x2": x2,
                 "bbox_y2": y2,
+                "segment": segment,
             },
         )
+
+        if segment is not None:
+            if created:
+                segment_manager.record_frame(
+                    segment=segment,
+                    frame_number=frame_number,
+                    timestamp=frame_time,
+                )
+                if (
+                    segment_validator is not None
+                    and segment_validator.should_buffer_event(segment)
+                ):
+                    segment_validator.remember_pending_event(segment, frame_event.pk)
+            elif frame_event.segment_id is None:
+                # This path is mainly for retry/recovery scenarios where the
+                # frame row was saved before segment support was enabled.
+                frame_event.segment = segment
+                frame_event.save(update_fields=["segment"])
 
 
 def _run_processing(
@@ -425,6 +540,8 @@ def _run_processing(
 
     try:
         processor = VideoProcessor()
+        segment_manager = TrackSegmentManager(report_id)
+        segment_validator = SegmentAppearanceValidator()
         # Keep matches scoped to this upload, never across unrelated videos.
         similarity_index = PersonSimilarityIndex()
 
@@ -440,6 +557,7 @@ def _run_processing(
             tracked,
             frame_number,
             fps,
+            appearance_frame=None,
         ):
             update_track_frame(
                 frame=frame,
@@ -448,6 +566,10 @@ def _run_processing(
                 fps=fps,
                 report_id=report_id,
                 video_version=video_version,
+                segment_manager=segment_manager,
+                segment_validator=segment_validator,
+                appearance_frame=appearance_frame,
+                segment_snapshot_callback=track_event_handler,
 
             )
         report = processor.process(
@@ -537,6 +659,8 @@ def _run_processing(
     except Exception as exc:
         update_job_progress(job_id, status="Failed", error=str(exc))
     finally:
+        if "segment_manager" in locals():
+            segment_manager.close_all()
         close_old_connections()
         finish_user_job(user_id, job_id)
 
@@ -748,21 +872,23 @@ def _serialize_identity_groups_for_video(report, identity_group_ids):
         report.identity_groups.filter(
             group_key__in=identity_group_ids,
             is_active=True,
-        ).prefetch_related("tracks__frame_events")
+        ).prefetch_related("segments__frame_events")
     )
 
     serialized_groups = []
     for group in groups:
         crops = []
-        for track in group.tracks.all():
+        for segment in group.segments.all():
             # A thumbnail exists for the new-track snapshot that OSNet used
             # for matching. Per-frame events deliberately have no thumbnail.
-            for event in track.frame_events.all():
+            for event in segment.frame_events.all():
                 if not event.thumbnail_url:
                     continue
                 crops.append(
                     {
-                        "track_id": track.track_id,
+                        "track_id": segment.raw_track_id,
+                        "segment_id": segment.id,
+                        "segment_number": segment.segment_number,
                         "frame": event.frame_number,
                         "image_url": event.thumbnail_url,
                     }
@@ -895,6 +1021,10 @@ def merge_manual_identity_groups(request):
                 report_id=report_id,
                 identity_group=duplicate_group,
             ).values_list("track_id", flat=True))
+            moved_segment_ids = list(TrackSegment.objects.filter(
+                report_id=report_id,
+                identity_group=duplicate_group,
+            ).values_list("id", flat=True))
             affected_suggestions = list(
                 ManualGroupingSuggestion.objects.filter(
                     report_id=report_id,
@@ -912,11 +1042,15 @@ def merge_manual_identity_groups(request):
                 primary_group=primary_group,
                 duplicate_group=duplicate_group,
                 moved_track_ids=json.dumps(moved_track_ids),
+                moved_segment_ids=json.dumps(moved_segment_ids),
                 resolved_suggestion_ids=json.dumps(affected_suggestions),
             )
             PersonTrackStats.objects.filter(
                 report_id=report_id,
                 track_id__in=moved_track_ids,
+            ).update(identity_group=primary_group)
+            TrackSegment.objects.filter(
+                id__in=moved_segment_ids,
             ).update(identity_group=primary_group)
 
             # Keep the original group for undo, but remove it from all active
@@ -996,6 +1130,7 @@ def undo_manual_identity_group_merge(request):
             duplicate_group = merge.duplicate_group
             primary_group = merge.primary_group
             moved_track_ids = json.loads(merge.moved_track_ids)
+            moved_segment_ids = json.loads(merge.moved_segment_ids)
             resolved_suggestion_ids = json.loads(merge.resolved_suggestion_ids)
             if duplicate_group.merged_into_id != primary_group.id:
                 return JsonResponse(
@@ -1009,6 +1144,10 @@ def undo_manual_identity_group_merge(request):
             PersonTrackStats.objects.filter(
                 report_id=report_id,
                 track_id__in=moved_track_ids,
+                identity_group=primary_group,
+            ).update(identity_group=duplicate_group)
+            TrackSegment.objects.filter(
+                id__in=moved_segment_ids,
                 identity_group=primary_group,
             ).update(identity_group=duplicate_group)
             duplicate_group.is_active = True
@@ -1148,18 +1287,26 @@ def merge_selected_identity_groups(request):
             merge_history_ids = []
             for duplicate_group in duplicate_groups:
                 moved_track_ids = group_track_ids[duplicate_group.id]
+                moved_segment_ids = list(TrackSegment.objects.filter(
+                    report=report,
+                    identity_group=duplicate_group,
+                ).values_list("id", flat=True))
                 merge_history = ManualIdentityGroupMerge.objects.create(
                     report=report,
                     source_suggestion=None,
                     primary_group=primary_group,
                     duplicate_group=duplicate_group,
                     moved_track_ids=json.dumps(moved_track_ids),
+                    moved_segment_ids=json.dumps(moved_segment_ids),
                     resolved_suggestion_ids=json.dumps(affected_suggestions),
                 )
                 merge_history_ids.append(merge_history.id)
                 PersonTrackStats.objects.filter(
                     report=report,
                     track_id__in=moved_track_ids,
+                ).update(identity_group=primary_group)
+                TrackSegment.objects.filter(
+                    id__in=moved_segment_ids,
                 ).update(identity_group=primary_group)
                 duplicate_group.is_active = False
                 duplicate_group.merged_into = primary_group
@@ -1222,9 +1369,19 @@ def generate_separate_video(request):
     try:
         report_id = int(request.POST.get("report_id"))
         identity_group_ids_payload = request.POST.get("identity_group_ids")
+        segment_ids_payload = request.POST.get("segment_ids")
         track_ids_payload = request.POST.get("track_ids")
 
-        if identity_group_ids_payload:
+        if segment_ids_payload:
+            segment_ids = sorted({
+                int(segment_id) for segment_id in json.loads(segment_ids_payload)
+            })
+            if not segment_ids:
+                raise ValueError
+            track_id = None
+            track_ids = None
+            identity_group_ids = None
+        elif identity_group_ids_payload:
             identity_group_ids = sorted({
                 int(group_id)
                 for group_id in json.loads(identity_group_ids_payload)
@@ -1233,16 +1390,19 @@ def generate_separate_video(request):
                 raise ValueError
             track_id = None
             track_ids = None
+            segment_ids = None
         elif track_ids_payload:
             track_ids = sorted({int(track_id) for track_id in json.loads(track_ids_payload)})
             if len(track_ids) < 2:
                 raise ValueError
             track_id = None
             identity_group_ids = None
+            segment_ids = None
         else:
             track_id = int(request.POST.get("track_id"))
             track_ids = None
             identity_group_ids = None
+            segment_ids = None
 
     except (TypeError, ValueError, json.JSONDecodeError):
         return JsonResponse(
@@ -1258,6 +1418,34 @@ def generate_separate_video(request):
             id=report_id
         )
 
+        if segment_ids:
+            known_segment_ids = set(
+                report.track_segments.filter(
+                    id__in=segment_ids,
+                ).values_list("id", flat=True)
+            )
+            missing_segment_ids = set(segment_ids) - known_segment_ids
+            if missing_segment_ids:
+                missing_ids = ", ".join(
+                    str(segment_id) for segment_id in sorted(missing_segment_ids)
+                )
+                raise ValueError(f"Track segment(s) not found: {missing_ids}.")
+
+            parts = report.output_video.strip("/").split("/")
+            video_version = parts[2]
+            result = SeparateVideoGenerator.generate_merged(
+                report_id=report_id,
+                segment_ids=segment_ids,
+                video_version=video_version,
+            )
+            return JsonResponse(
+                {
+                    "success": True,
+                    **result,
+                    "source": result.get("source", "generated"),
+                }
+            )
+
         if identity_group_ids:
             known_group_ids = set(
                 report.identity_groups.filter(
@@ -1272,24 +1460,40 @@ def generate_separate_video(request):
                 )
                 raise ValueError(f"Identity group(s) not found: {missing_ids}.")
 
-            # Expand each visible representative group into every internal
-            # tracker ID that OSNet attached to it.
-            resolved_track_ids = sorted(set(
-                PersonTrackStats.objects.filter(
-                    report_id=report_id,
-                    identity_group__group_key__in=identity_group_ids,
-                ).values_list("track_id", flat=True)
-            ))
-            if not resolved_track_ids:
-                raise ValueError("No tracks found for the selected identity group(s).")
-
             parts = report.output_video.strip("/").split("/")
             video_version = parts[2]
-            result = SeparateVideoGenerator.generate_merged(
-                report_id=report_id,
-                track_ids=resolved_track_ids,
-                video_version=video_version,
-            )
+            resolved_segment_ids = sorted(set(
+                report.track_segments.filter(
+                    identity_group__group_key__in=identity_group_ids,
+                ).values_list("id", flat=True)
+            ))
+            if resolved_segment_ids:
+                result = SeparateVideoGenerator.generate_merged(
+                    report_id=report_id,
+                    segment_ids=resolved_segment_ids,
+                    video_version=video_version,
+                )
+            elif not report.track_segments.exists():
+                # Reports produced before segment support have no safe segment
+                # records, so preserve the original raw-ID behaviour only for
+                # those legacy reports.
+                resolved_track_ids = sorted(set(
+                    PersonTrackStats.objects.filter(
+                        report_id=report_id,
+                        identity_group__group_key__in=identity_group_ids,
+                    ).values_list("track_id", flat=True)
+                ))
+                if not resolved_track_ids:
+                    raise ValueError("No tracks found for the selected identity group(s).")
+                result = SeparateVideoGenerator.generate_merged(
+                    report_id=report_id,
+                    track_ids=resolved_track_ids,
+                    video_version=video_version,
+                )
+            else:
+                raise ValueError(
+                    "No track segments found for the selected identity group(s)."
+                )
 
             return JsonResponse(
                 {

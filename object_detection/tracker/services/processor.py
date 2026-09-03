@@ -349,10 +349,10 @@ class VideoProcessor:
                     frame,
                 )
 
-            print(
+            # print(
                 "============tracker type==============",
-                tracker_type,
-            )
+                # tracker_type,
+            # )
             
 
             # Save a snapshot for every NEW track ID
@@ -397,8 +397,10 @@ class VideoProcessor:
                     )
 
                     print(
+                        f"-----------------------------"
                         f"NEW TRACK ID={track_id} "
                         f"FRAME={current_frame}"
+                        f"-----------------------------"
                     )
 
                     if track_event_callback:
@@ -428,6 +430,13 @@ class VideoProcessor:
 
 
             self.presence_tracker.update(tracked,current_frame,)
+
+            # ReID must see the original pixels rather than the visualizer's
+            # boxes/labels, while the existing saved tracking frame keeps its
+            # current annotated appearance.
+            appearance_frame = (
+                frame.copy() if track_frame_callback and tracked else None
+            )
                     
 
             Visualizer.draw_tracks(frame, tracked, selected_track_id=selected_track_id)
@@ -449,6 +458,7 @@ class VideoProcessor:
                     tracked=tracked,
                     frame_number=current_frame,
                     fps=info["fps"],
+                    appearance_frame=appearance_frame,
                 )
 
             writer.write(frame)

@@ -433,10 +433,18 @@
             // before skipping an already-rendered tracking card.
             renderSimilarPeople(event);
 
-            const trackId = String(event.track_id);
+            // A raw ByteTrack ID can have more than one appearance-safe
+            // segment. Use the segment as the card identity when available;
+            // otherwise retain the legacy raw-ID key for older events.
+            const segmentId = event.segment_id == null
+                ? null
+                : String(event.segment_id);
+            const eventKey = segmentId
+                ? "segment:" + segmentId
+                : "track:" + String(event.track_id);
             const existingCard = Array.from(container.children).find(
                 function (card) {
-                    return card.dataset.trackId === trackId;
+                    return card.dataset.eventKey === eventKey;
                 }
             );
 
@@ -460,16 +468,16 @@
                 if (existingCard) {
                     existingCard.remove();
                 }
-                displayedTrackIds.delete(trackId);
+                displayedTrackIds.delete(eventKey);
                 return;
             }
 
-            if (displayedTrackIds.has(trackId)) {
+            if (displayedTrackIds.has(eventKey)) {
                 return;
             }
 
             displayedTrackIds.add(
-                trackId
+                eventKey
             );
 
 
@@ -479,6 +487,10 @@
             card.className = "new-track-event";
             card.classList.toggle("selection-disabled", !isTrackSelectionEnabled);
             card.dataset.trackId = String(event.track_id);
+            card.dataset.eventKey = eventKey;
+            if (segmentId) {
+                card.dataset.segmentId = segmentId;
+            }
             card.dataset.reportId = String(event.report_id);
             if (event.identity_group_id !== undefined) {
                 card.dataset.identityGroupId = String(event.identity_group_id);
@@ -502,9 +514,10 @@
             title.className =
                 "new-track-event-title";
 
-            title.textContent =
-                "New Track ID " +
-                event.track_id;
+            title.textContent = segmentId
+                ? "New Segment " + event.track_id + "-" +
+                    (event.segment_number || "?")
+                : "New Track ID " + event.track_id;
 
 
             const meta =
@@ -590,6 +603,10 @@
 
                 image.dataset.trackId =
                     event.track_id;
+
+                if (segmentId) {
+                    image.dataset.segmentId = segmentId;
+                }
 
                 image.dataset.reportId =
                     event.report_id;
