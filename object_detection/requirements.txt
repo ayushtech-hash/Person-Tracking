@@ -9,3 +9,5 @@ torch
 torchvision
 torchreid
 gdown
+djangorestframework
+djangorestframework-simplejwt

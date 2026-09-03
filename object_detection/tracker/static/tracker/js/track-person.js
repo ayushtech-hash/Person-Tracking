@@ -89,6 +89,7 @@
     }
 
     window.clearMainTrackedVideoGroups = clearMainTrackedVideoGroups;
+    window.showTrackedVideoGroupsOnPage = showTrackedVideoGroupsOnPage;
 
     function showTrackedVideoGroupsOnPage(identityGroups) {
         // The generated selected-person video stays in the lightbox.  Do not
@@ -127,9 +128,19 @@
         reportId,
         triggerButton
     ) {
-        const buttonLabel = triggerButton.textContent;
-        triggerButton.disabled = true;
-        triggerButton.textContent = "Generating...";
+        const buttonLabel = triggerButton ? triggerButton.textContent : "";
+        if (triggerButton) {
+            triggerButton.disabled = true;
+            triggerButton.textContent = "Generating...";
+        }
+
+        trackPersonBtn.disabled = true;
+        trackPersonBtn.textContent = "Generating...";
+        trackPersonBtn.style.display = "inline-flex";
+
+        if (trackGuide) {
+            trackGuide.style.display = "none";
+        }
 
         if (window.showLightboxVideoLoading) {
             window.showLightboxVideoLoading(identityGroupIds);
@@ -180,8 +191,13 @@
             console.error("Separate video error:", error);
             alert(error.message || "Failed to generate separate video.");
         } finally {
-            triggerButton.disabled = false;
-            triggerButton.textContent = buttonLabel;
+            if (triggerButton) {
+                triggerButton.disabled = false;
+                triggerButton.textContent = buttonLabel;
+            }
+
+            trackPersonBtn.disabled = false;
+            trackPersonBtn.textContent = "Track Person";
         }
     };
 

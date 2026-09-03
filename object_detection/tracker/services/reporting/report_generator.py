@@ -1,6 +1,7 @@
 from tracker.services.tracking.presence_tracker import PresenceReport
 from typing import Dict, List, Optional, Union
 from tracker.models import (
+    ManualGroupingSuggestion,
     PersonIdentityGroup,
     PersonTrackStats,
     TrackingReport,
@@ -87,11 +88,13 @@ class ReportGenerator:
         selected_track_id: Optional[int] = None,
         frame_events: Optional[List[Dict]] = None,
         identity_groups: Optional[List[Dict]] = None,
+        manual_grouping_suggestions: Optional[List[Dict]] = None,
         tracking_report: Optional[TrackingReport] = None,
     ) -> TrackingReport:
 
         frame_events = frame_events or []
         identity_groups = identity_groups or []
+        manual_grouping_suggestions = manual_grouping_suggestions or []
 
         # =========================================================
         # 1. Create or finalize TrackingReport + PersonTrackStats
@@ -244,7 +247,54 @@ class ReportGenerator:
                 )
 
         # =========================================================
-        # 4. Create TrackFrameEvent records
+        # 4. Persist below-auto-threshold suggestions for manual review
+        # =========================================================
+
+        persisted_groups_by_key = {
+            group.group_key: group
+            for group in tracking_report.identity_groups.all()
+        }
+        for suggestion in manual_grouping_suggestions:
+            first_group = persisted_groups_by_key.get(
+                suggestion.get("first_identity_group_id")
+            )
+            second_group = persisted_groups_by_key.get(
+                suggestion.get("second_identity_group_id")
+            )
+            if first_group is None or second_group is None:
+                continue
+
+            # Group keys are normalized by the similarity index.  Keep the
+            # same ordering here so a suggestion pair is never duplicated.
+            if first_group.group_key > second_group.group_key:
+                first_group, second_group = second_group, first_group
+                first_prefix, second_prefix = "second", "first"
+            else:
+                first_prefix, second_prefix = "first", "second"
+
+            ManualGroupingSuggestion.objects.update_or_create(
+                report=tracking_report,
+                first_group=first_group,
+                second_group=second_group,
+                defaults={
+                    "first_track_id": int(suggestion[f"{first_prefix}_track_id"]),
+                    "first_frame_number": int(suggestion[f"{first_prefix}_frame"]),
+                    "first_image_url": suggestion.get(
+                        f"{first_prefix}_image_url", ""
+                    ),
+                    "second_track_id": int(suggestion[f"{second_prefix}_track_id"]),
+                    "second_frame_number": int(suggestion[f"{second_prefix}_frame"]),
+                    "second_image_url": suggestion.get(
+                        f"{second_prefix}_image_url", ""
+                    ),
+                    "similarity": float(suggestion["similarity"]),
+                    "status": ManualGroupingSuggestion.Status.PENDING,
+                    "is_resolved": False,
+                },
+            )
+
+        # =========================================================
+        # 5. Create TrackFrameEvent records
         # =========================================================
 
         for event in frame_events:
@@ -283,17 +333,62 @@ class ReportGenerator:
                 frame_event.full_frame_url = event.get("full_frame_url", "")
                 frame_event.save(update_fields=["full_frame_url"])
 
-        # =========================================================
-        # 5. Save all frame events at once
-        # =========================================================
-
         return tracking_report
+
+    @staticmethod
+    def _serialize_track_stats_row(
+        stats: List[PersonTrackStats],
+        identity_group_id: int = None,
+    ) -> Dict[str, Union[int, float]]:
+        representative_track_id = min(stat.track_id for stat in stats)
+
+        row = {
+            "track_id": representative_track_id,
+            "first_seen": min(stat.first_seen for stat in stats),
+            "last_seen": max(stat.last_seen for stat in stats),
+            "visible_duration": sum(stat.visible_duration for stat in stats),
+            "frames_seen": sum(stat.frames_seen for stat in stats),
+        }
+        if identity_group_id is not None:
+            row["identity_group_id"] = identity_group_id
+
+        return row
+
+    @staticmethod
+    def _serialize_grouped_track_stats(
+        track_stats: List[PersonTrackStats],
+    ) -> List[Dict[str, Union[int, float]]]:
+        grouped_stats = {}
+        display_rows = []
+
+        for stat in track_stats:
+            identity_group = stat.identity_group
+
+            if identity_group and identity_group.is_active:
+                grouped_stats.setdefault(identity_group.id, []).append(stat)
+            else:
+                display_rows.append(
+                    ReportGenerator._serialize_track_stats_row([stat])
+                )
+
+        for stats in grouped_stats.values():
+            identity_group = stats[0].identity_group
+            display_rows.append(
+                ReportGenerator._serialize_track_stats_row(
+                    stats,
+                    identity_group_id=identity_group.group_key,
+                )
+            )
+
+        return sorted(display_rows, key=lambda row: row["track_id"])
 
     @staticmethod
     def serialize_tracking_report(
         tracking_report: TrackingReport,
     ) -> Dict[str, Union[int, float, str, List[Dict]]]:
-        track_stats = list(tracking_report.track_stats.all())
+        track_stats = list(
+            tracking_report.track_stats.select_related("identity_group")
+        )
 
         if tracking_report.selected_track_id is not None:
             stat = track_stats[0]
@@ -310,16 +405,9 @@ class ReportGenerator:
 
         return {
             "id": tracking_report.id,
-            "reports": [
-                {
-                    "track_id": stat.track_id,
-                    "first_seen": stat.first_seen,
-                    "last_seen": stat.last_seen,
-                    "visible_duration": stat.visible_duration,
-                    "frames_seen": stat.frames_seen,
-                }
-                for stat in track_stats
-            ],
+            "reports": ReportGenerator._serialize_grouped_track_stats(
+                track_stats
+            ),
             "peak_persons_detected": tracking_report.peak_persons_detected,
             "total_visible_time": tracking_report.total_visible_time,
             "output_video": tracking_report.output_video,

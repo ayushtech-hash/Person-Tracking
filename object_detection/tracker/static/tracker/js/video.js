@@ -14,6 +14,9 @@
     const formError = document.getElementById("form-error");
 
     let pollInterval = null;
+    let activeJobId = null;
+
+    let refreshPromise = null;
     let lastProgress = {
         current_frame: 0,
         total_frames: 0
@@ -76,6 +79,151 @@
         }
     }
 
+    window.applyManualGroupMerge = function (mergeData) {
+        const primaryGroupId = String(mergeData.identity_group_id);
+        const duplicateGroupIds = mergeData.duplicate_identity_group_ids || [
+            mergeData.duplicate_identity_group_id
+        ];
+        let primaryCard = document.querySelector(
+            '.new-track-event[data-identity-group-id="' + primaryGroupId + '"]'
+        );
+
+        // If the duplicate had been selected, preserve that user choice by
+        // selecting the surviving representative before removing the card.
+        if (
+            duplicateGroupIds.some(function (groupId) {
+                const duplicateCard = document.querySelector(
+                    '.new-track-event[data-identity-group-id="' +
+                    String(groupId) +
+                    '"]'
+                );
+                return duplicateCard && duplicateCard.classList.contains("selected");
+            }) &&
+            primaryCard
+        ) {
+            primaryCard.classList.add("selected");
+            primaryCard.dataset.selected = "true";
+        }
+
+        duplicateGroupIds.forEach(function (groupId) {
+            const duplicateCard = document.querySelector(
+                '.new-track-event[data-identity-group-id="' +
+                String(groupId) +
+                '"]'
+            );
+            if (duplicateCard) {
+                displayedTrackIds.delete(duplicateCard.dataset.trackId);
+                duplicateCard.remove();
+            }
+        });
+
+        if (
+            mergeData.representative_event &&
+            primaryCard &&
+            primaryCard.dataset.trackId !== String(mergeData.representative_event.track_id)
+        ) {
+            const wasSelected = primaryCard.classList.contains("selected");
+            displayedTrackIds.delete(primaryCard.dataset.trackId);
+            primaryCard.remove();
+            renderNewTrackEvents([mergeData.representative_event]);
+            primaryCard = document.querySelector(
+                '.new-track-event[data-identity-group-id="' + primaryGroupId + '"]'
+            );
+            if (wasSelected && primaryCard) {
+                primaryCard.classList.add("selected");
+                primaryCard.dataset.selected = "true";
+            }
+        }
+
+        const container = document.getElementById("new-track-events");
+        const emptyState = document.getElementById("new-track-empty");
+        if (container && emptyState) {
+            emptyState.style.display = container.children.length ? "none" : "flex";
+        }
+        updateSelectedPeopleUI();
+    };
+
+    function updateManualGroupingSectionVisibility() {
+        const section = document.getElementById("manual-grouping-section");
+        const suggestions = document.getElementById("manual-grouping-suggestions");
+        const undoContainer = document.getElementById("manual-grouping-undo");
+        if (!section || !suggestions || !undoContainer) return;
+
+        section.style.display =
+            suggestions.children.length || undoContainer.children.length
+                ? "block"
+                : "none";
+    }
+
+    function showManualGroupUndo(mergeData) {
+        const undoContainer = document.getElementById("manual-grouping-undo");
+        if (!undoContainer) return;
+
+        const existingEntry = undoContainer.querySelector(
+            '[data-manual-merge-id="' + mergeData.manual_merge_id + '"]'
+        );
+        if (existingEntry) {
+            return;
+        }
+
+        const entry = document.createElement("div");
+        entry.className = "manual-grouping-undo-entry";
+        entry.dataset.manualMergeId = String(mergeData.manual_merge_id);
+        const message = document.createElement("span");
+        message.textContent =
+            "Groups " + mergeData.identity_group_id + " and " +
+            mergeData.duplicate_identity_group_id + " were grouped.";
+        const undoButton = document.createElement("button");
+        undoButton.type = "button";
+        undoButton.className = "manual-grouping-action manual-grouping-undo-action";
+        undoButton.textContent = "Undo";
+        undoButton.addEventListener("click", async function () {
+            const config = document.getElementById("app-config");
+            const csrfToken = document.querySelector("[name=csrfmiddlewaretoken]");
+            const formData = new FormData();
+            formData.append("report_id", mergeData.report_id);
+            formData.append("manual_merge_id", mergeData.manual_merge_id);
+
+            undoButton.disabled = true;
+            undoButton.textContent = "Undoing...";
+            try {
+                const response = await fetch(config.dataset.undoManualGroupUrl, {
+                    method: "POST",
+                    headers: {
+                        "X-CSRFToken": csrfToken ? csrfToken.value : "",
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    body: formData,
+                });
+                const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.error || "Could not undo grouping.");
+                    }
+                    if (data.report) {
+                        renderResults(data);
+                    }
+                    if (data.restored_event) {
+                        renderNewTrackEvents([data.restored_event]);
+                    }
+                    renderManualGroupingSuggestions(data.remaining_suggestions);
+                if (window.clearMainTrackedVideoGroups) {
+                    window.clearMainTrackedVideoGroups();
+                }
+                entry.remove();
+                updateManualGroupingSectionVisibility();
+            } catch (error) {
+                undoButton.disabled = false;
+                undoButton.textContent = "Undo";
+                alert(error.message || "Could not undo grouping.");
+            }
+        });
+
+        entry.appendChild(message);
+        entry.appendChild(undoButton);
+        undoContainer.appendChild(entry);
+        updateManualGroupingSectionVisibility();
+    }
+
 
     function formatStatus(status) {
         const labels = {
@@ -120,12 +268,43 @@
     }
 
 
-    async function fetchProgress() {
-        const config =
-            document.getElementById("app-config");
+    async function refreshAuthentication() {
+        if (!refreshPromise) {
+            refreshPromise = fetch(
+                "/api/auth/refresh/",
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                }
+            )
+                .then(function (response) {
+                    return response.ok;
+                })
+                .catch(function () {
+                    return false;
+                })
+                .finally(function () {
+                    refreshPromise = null;
+                });
+        }
 
-        const response =
-            await fetch(config.dataset.progressUrl);
+        return refreshPromise;
+    }
+
+
+    async function requestProgress(progressUrl) {
+        const response = await fetch(
+            progressUrl,
+            {
+                credentials: "same-origin",
+            }
+        );
+
+        if (response.status === 401) {
+            return {
+                authenticationRequired: true,
+            };
+        }
 
         const contentType =
             response.headers.get("content-type") || "";
@@ -136,7 +315,61 @@
             );
         }
 
-        return response.json();
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                data.error || "Could not retrieve processing progress."
+            );
+        }
+
+        return data;
+    }
+
+
+    async function fetchProgress() {
+        const config =
+            document.getElementById("app-config");
+
+        if (!activeJobId) {
+            throw new Error("Missing progress job id.");
+        }
+
+        const progressUrl =
+            new URL(
+                config.dataset.progressUrl,
+                window.location.origin
+            );
+
+        progressUrl.searchParams.set(
+            "job_id",
+            activeJobId
+        );
+
+        let progressData =
+            await requestProgress(progressUrl);
+
+        if (progressData.authenticationRequired) {
+            const refreshed =
+                await refreshAuthentication();
+
+            if (!refreshed) {
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
+            }
+
+            progressData =
+                await requestProgress(progressUrl);
+
+            if (progressData.authenticationRequired) {
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
+            }
+        }
+
+        return progressData;
     }
 
 
@@ -281,21 +514,9 @@
                 "new-track-event-meta";
 
 
-            const timeLabel =
-                (
-                    event.time_sec === undefined ||
-                    event.time_sec === null
-                )
-                    ? ""
-                    : " • " +
-                      event.time_sec +
-                      " sec";
-
-
             meta.textContent =
                 "Frame " +
-                event.frame +
-                timeLabel;
+                event.frame;
 
 
             info.appendChild(title);
@@ -309,7 +530,9 @@
                 "new-track-badge";
 
             badge.textContent =
-                "NEW ID";
+                event.time_sec === undefined || event.time_sec === null
+                    ? ""
+                    : event.time_sec + " sec";
 
 
             header.appendChild(info);
@@ -499,6 +722,159 @@
         });
     }
 
+    function renderManualGroupingSuggestions(suggestions) {
+        const section = document.getElementById("manual-grouping-section");
+        const container = document.getElementById("manual-grouping-suggestions");
+
+        if (!section || !container) {
+            return;
+        }
+
+        container.innerHTML = "";
+        if (!Array.isArray(suggestions) || !suggestions.length) {
+            updateManualGroupingSectionVisibility();
+            return;
+        }
+
+        suggestions.forEach(function (suggestion) {
+            const item = document.createElement("article");
+            item.className = "manual-grouping-suggestion";
+            item.dataset.suggestionId = String(suggestion.id);
+
+            const dismissButton = document.createElement("button");
+            dismissButton.type = "button";
+            dismissButton.className = "manual-grouping-dismiss";
+            dismissButton.textContent = "×";
+            dismissButton.title = "Dismiss this suggestion";
+            dismissButton.setAttribute("aria-label", "Dismiss this suggestion");
+            dismissButton.addEventListener("click", async function () {
+                const config = document.getElementById("app-config");
+                const csrfToken = document.querySelector("[name=csrfmiddlewaretoken]");
+                const formData = new FormData();
+                formData.append("report_id", suggestion.report_id);
+                formData.append("suggestion_id", suggestion.id);
+
+                dismissButton.disabled = true;
+                try {
+                    const response = await fetch(
+                        config.dataset.dismissManualSuggestionUrl,
+                        {
+                            method: "POST",
+                            headers: {
+                                "X-CSRFToken": csrfToken ? csrfToken.value : "",
+                                "X-Requested-With": "XMLHttpRequest",
+                            },
+                            body: formData,
+                        }
+                    );
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.error || "Could not dismiss suggestion.");
+                    }
+                    renderManualGroupingSuggestions(data.remaining_suggestions);
+                } catch (error) {
+                    dismissButton.disabled = false;
+                    alert(error.message || "Could not dismiss suggestion.");
+                }
+            });
+
+            const title = document.createElement("div");
+            title.className = "manual-grouping-suggestion-title";
+            title.textContent = "Possible same person ";
+            const score = document.createElement("span");
+            score.textContent =
+                Math.round(Number(suggestion.similarity) * 100) + "% match";
+            title.appendChild(score);
+
+            const images = document.createElement("div");
+            images.className = "manual-grouping-suggestion-images";
+            [
+                {
+                    imageUrl: suggestion.first_image_url,
+                    trackId: suggestion.first_track_id,
+                    frame: suggestion.first_frame_number,
+                    groupKey: suggestion.first_group__group_key,
+                },
+                {
+                    imageUrl: suggestion.second_image_url,
+                    trackId: suggestion.second_track_id,
+                    frame: suggestion.second_frame_number,
+                    groupKey: suggestion.second_group__group_key,
+                },
+            ].forEach(function (candidate) {
+                const figure = document.createElement("figure");
+                const image = document.createElement("img");
+                image.src = candidate.imageUrl;
+                image.alt =
+                    "Review candidate: track " + candidate.trackId +
+                    " at frame " + candidate.frame;
+                image.loading = "lazy";
+
+                const caption = document.createElement("figcaption");
+                caption.textContent =
+                    "Group " + candidate.groupKey + " · track " +
+                    candidate.trackId + " · frame " + candidate.frame;
+                figure.appendChild(image);
+                figure.appendChild(caption);
+                images.appendChild(figure);
+            });
+
+            item.appendChild(dismissButton);
+            item.appendChild(title);
+            item.appendChild(images);
+            const groupButton = document.createElement("button");
+            groupButton.type = "button";
+            groupButton.className = "manual-grouping-action";
+            groupButton.textContent = "Merge Images";
+            groupButton.addEventListener("click", async function () {
+                const config = document.getElementById("app-config");
+                const csrfToken = document.querySelector("[name=csrfmiddlewaretoken]");
+                const formData = new FormData();
+                formData.append("report_id", suggestion.report_id);
+                formData.append("suggestion_id", suggestion.id);
+
+                groupButton.disabled = true;
+                groupButton.textContent = "Grouping...";
+                try {
+                    const response = await fetch(config.dataset.manualGroupUrl, {
+                        method: "POST",
+                        headers: {
+                            "X-CSRFToken": csrfToken ? csrfToken.value : "",
+                            "X-Requested-With": "XMLHttpRequest",
+                        },
+                        body: formData,
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.error || "Could not group images.");
+                    }
+                    // Refresh statistics first. The thumbnail/video UI below
+                    // is independent, so an issue there must not leave the
+                    // Tracking Report showing the pre-merge rows.
+                    if (data.report) {
+                        renderResults(data);
+                    }
+                    renderManualGroupingSuggestions(data.remaining_suggestions);
+                    if (window.applyManualGroupMerge) {
+                        window.applyManualGroupMerge(data);
+                    }
+                    showManualGroupUndo(data);
+                    if (window.showTrackedVideoGroupsOnPage) {
+                        window.showTrackedVideoGroupsOnPage(data.identity_groups);
+                    }
+                } catch (error) {
+                    groupButton.disabled = false;
+                    groupButton.textContent = "Merge Images";
+                    alert(error.message || "Could not group images.");
+                }
+            });
+            item.appendChild(groupButton);
+            container.appendChild(item);
+        });
+
+        updateManualGroupingSectionVisibility();
+    }
+
     window.getSelectedIdentityGroupIdsForLightbox =
         function (lightboxTrackId) {
 
@@ -543,9 +919,9 @@
         document.getElementById("track-selected-people");
 
     if (trackSelectedPeopleBtn) {
-        trackSelectedPeopleBtn.addEventListener("click", function () {
+        trackSelectedPeopleBtn.addEventListener("click", async function () {
             const selectedCards = getSelectedCards();
-            const identityGroupIds = selectedCards
+            let identityGroupIds = selectedCards
                 .map(function (card) {
                     return Number(card.dataset.identityGroupId);
                 })
@@ -570,20 +946,72 @@
                 return;
             }
 
-            // Keep the existing generated-video experience in the lightbox.
-            // The main page retains the original processed video and later
-            // receives only the selected groups' upper-half crops.
-            const firstImage = selectedCards[0].querySelector("img");
-            if (firstImage) {
-                firstImage.click();
-            }
+            const reportId = reportIds[0];
+            const config = document.getElementById("app-config");
+            const csrfToken = document.querySelector("[name=csrfmiddlewaretoken]");
 
-            if (window.generateSeparateVideo) {
-                window.generateSeparateVideo(
-                    identityGroupIds,
-                    reportIds[0],
-                    trackSelectedPeopleBtn
+            trackSelectedPeopleBtn.disabled = true;
+            try {
+                if (identityGroupIds.length > 1) {
+                    const formData = new FormData();
+                    formData.append("report_id", reportId);
+                    formData.append(
+                        "identity_group_ids",
+                        JSON.stringify(identityGroupIds)
+                    );
+
+                    const response = await fetch(config.dataset.selectedGroupUrl, {
+                        method: "POST",
+                        headers: {
+                            "X-CSRFToken": csrfToken ? csrfToken.value : "",
+                            "X-Requested-With": "XMLHttpRequest",
+                        },
+                        body: formData,
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.error || "Could not group selected people.");
+                    }
+                    if (data.report) {
+                        renderResults(data);
+                    }
+                    if (window.applyManualGroupMerge) {
+                        window.applyManualGroupMerge(data);
+                    }
+                    renderManualGroupingSuggestions(data.remaining_suggestions);
+                    if (window.showTrackedVideoGroupsOnPage) {
+                        window.showTrackedVideoGroupsOnPage(data.identity_groups);
+                    }
+                    identityGroupIds = [Number(data.identity_group_id)];
+                }
+
+                // Keep the existing generated-video experience in the lightbox.
+                // The main page retains the original processed video and later
+                // receives only the selected groups' upper-half crops.
+                const activeCard = document.querySelector(
+                    '.new-track-event[data-identity-group-id="' +
+                    String(identityGroupIds[0]) +
+                    '"]'
                 );
+                const firstImage = activeCard
+                    ? activeCard.querySelector("img")
+                    : selectedCards[0].querySelector("img");
+                if (firstImage) {
+                    firstImage.click();
+                }
+
+                if (window.generateSeparateVideo) {
+                    window.generateSeparateVideo(
+                        identityGroupIds,
+                        reportId,
+                        trackSelectedPeopleBtn
+                    );
+                } else {
+                    updateSelectedPeopleUI();
+                }
+            } catch (error) {
+                alert(error.message || "Could not track selected people.");
+                updateSelectedPeopleUI();
             }
         });
     }
@@ -639,11 +1067,25 @@
                         }
 
                     } catch (err) {
-
                         console.error(
                             "Failed to fetch progress:",
                             err
                         );
+
+                        if (
+                            err.message ===
+                            "Your session has expired. Please log in again."
+                        ) {
+                            stopPolling();
+
+                            progressSection.style.display =
+                                "none";
+
+                            submitBtn.disabled =
+                                false;
+
+                            showFormError(err.message);
+                        }
                     }
 
                 },
@@ -718,14 +1160,16 @@
                         '<div class="table-wrap"><table>';
 
                     html +=
-                        '<tr>' +
+                        '<thead><tr>' +
                         '<th>Track ID</th>' +
                         '<th>First Seen (sec)</th>' +
                         '<th>Last Seen (sec)</th>' +
                         '<th>Visible Duration (sec)</th>' +
                         '<th>Frames Seen</th>' +
-                        '</tr>';
+                        '</tr></thead>';
 
+                    html +=
+                        '<tbody id="tracking-report-body">';
 
                     data.report.reports.forEach(
                         function (item) {
@@ -763,7 +1207,7 @@
 
 
                     html +=
-                        '</table></div>';
+                        '</tbody></table></div>';
 
                 } else {
 
@@ -926,12 +1370,16 @@
             displayedSimilarityPairs =
                 new Set();
 
+            activeJobId =
+                null;
+
             const similarPeople = document.getElementById(
                 "similar-person-matches"
             );
             if (similarPeople) {
                 similarPeople.innerHTML = "";
             }
+            renderManualGroupingSuggestions([]);
 
 
             const newTrackEvents =
@@ -1061,6 +1509,13 @@
                 }
 
 
+                if (!data.job_id) {
+
+                    throw new Error(
+                        "Server did not return a progress job id. Please refresh and try again."
+                    );
+                }
+
                 if (
                     window.setTrackPersonAvailable
                 ) {
@@ -1069,6 +1524,9 @@
                         false
                     );
                 }
+
+                activeJobId =
+                    data.job_id;
 
 
                 startPolling(
@@ -1118,6 +1576,10 @@
 
                                 renderResults(
                                     result
+                                );
+
+                                renderManualGroupingSuggestions(
+                                    result.manual_grouping_suggestions || []
                                 );
 
                                 submitBtn.disabled =

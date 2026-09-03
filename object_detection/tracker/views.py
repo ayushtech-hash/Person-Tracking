@@ -4,45 +4,69 @@ from django.http import multipartparser
 import os
 import threading
 import time
+import uuid
 import cv2
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
+from django.db.models import Q
+from django.utils import timezone
 from django.http import JsonResponse
 from django.shortcuts import render
 from .forms import ImageUploadForm, VideoUploadForm
 from .services.detection.image_processor import ImageProcessor
 from .services.processor import VideoProcessor
-from .services.reporting.progress import progress
+from .services.reporting.progress import (
+    append_new_track_event,
+    finish_user_job,
+    get_job_progress,
+    start_user_job,
+    update_job_progress,
+    update_report_for_report_id,
+)
 from .services.reporting.report_generator import ReportGenerator
-from .models import TrackingReport,PersonTrackStats,TrackFrameEvent
+from .models import (
+    ManualGroupingSuggestion,
+    ManualIdentityGroupMerge,
+    PersonIdentityGroup,
+    PersonTrackStats,
+    TrackFrameEvent,
+    TrackingReport,
+)
 
-from .services.detection.image_processor import ImageProcessor
-from .services.processor import VideoProcessor
 from .services.video.seperate_video import SeparateVideoGenerator
-from .services.reporting.progress import progress
-from .services.reporting.report_generator import ReportGenerator
 from .services.video.video_paths import get_next_video_version, get_video_directories
 from .services.reidentification import PersonSimilarityIndex
 
+from .services.auth.decorators import jwt_api_login_required, jwt_login_required
 
-_processing_lock = threading.Lock()
-_is_processing = False
+
+
+def login_page(request):
+    return render(request, 'tracker/login.html')
+
+
+def register_page(request):
+    return render(request, 'tracker/register.html')
 
 
 def is_ajax(request):
     return request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
 
-def update_progress(current_frame, total_frames, status="Processing"):
+def update_progress(job_id, current_frame, total_frames, status="Processing"):
     percent = int((current_frame / total_frames) * 100) if total_frames else 0
 
-    progress["current_frame"] = current_frame
-    progress["total_frames"] = total_frames
-    progress["progress"] = percent
-    progress["status"] = status
+    update_job_progress(
+        job_id,
+        current_frame=current_frame,
+        total_frames=total_frames,
+        progress=percent,
+        status=status,
+    )
 
 def update_track_event(
+    job_id,
     frame,
     original_frame,
     bbox,
@@ -274,10 +298,7 @@ def update_track_event(
             event,
         )
 
-    if "new_track_events" not in progress:
-        progress["new_track_events"] = []
-
-    progress["new_track_events"].append(event)
+    append_new_track_event(job_id, event)
 
 
 def update_track_frame(
@@ -345,6 +366,15 @@ def update_track_frame(
     for track in tracked:
 
         track_id = int(track.track_id)
+        x1, y1, x2, y2 = map(int, track.bbox)
+
+        # Match the coordinates to the saved frame, including clipping boxes
+        # that lie partly outside its edges.
+        frame_height, frame_width = frame.shape[:2]
+        x1 = max(0, min(x1, frame_width - 1))
+        y1 = max(0, min(y1, frame_height - 1))
+        x2 = max(x1 + 1, min(x2, frame_width))
+        y2 = max(y1 + 1, min(y2, frame_height))
 
         # Find/create stats row for this track
         track_stats, created = (
@@ -367,25 +397,17 @@ def update_track_frame(
             defaults={
                 "timestamp": frame_time,
                 "full_frame_url": full_frame_url,
+                "bbox_x1": x1,
+                "bbox_y1": y1,
+                "bbox_x2": x2,
+                "bbox_y2": y2,
             },
         )
 
 
-def _reset_progress():
-    progress["current_frame"] = 0
-    progress["total_frames"] = 0
-    progress["progress"] = 0
-    progress["processing_time"] = None
-    progress["status"] = "Processing"
-    progress["output_video"] = None
-    progress["report"] = None
-    progress["report_id"] = None
-    progress["message"] = None
-    progress["error"] = None
-    progress["new_track_events"] = []
-
-
 def _run_processing(
+    job_id,
+    user_id,
     input_path,
     output_path,
     output_filename,
@@ -397,8 +419,6 @@ def _run_processing(
     video_version,
 
 ):
-    global _is_processing
-
     processing_start = time.time()
 
     close_old_connections()
@@ -410,6 +430,7 @@ def _run_processing(
 
         def track_event_handler(**event_data):
             update_track_event(
+                job_id=job_id,
                 **event_data,
                 similarity_index=similarity_index,
             )
@@ -435,7 +456,10 @@ def _run_processing(
             start_time=start_time,
             end_time=end_time,
             selected_track_id=track_id,
-            progress_callback=update_progress,
+            progress_callback=(
+                lambda current_frame, total_frames, status="Processing":
+                    update_progress(job_id, current_frame, total_frames, status)
+            ),
             track_event_callback=track_event_handler,
             track_frame_callback=track_frame_handler,
             video_version=video_version,
@@ -446,9 +470,12 @@ def _run_processing(
 
         processing_time = processing_end - processing_start
 
-        progress["processing_time"] = round(
-            processing_time,
-            2
+        update_job_progress(
+            job_id,
+            processing_time=round(
+                processing_time,
+                2
+            ),
         )
 
         output_video_url = (
@@ -459,18 +486,24 @@ def _run_processing(
         
         input_video_url = f"/media/uploads/{input_filename}"
 
-        progress["output_video"] = output_video_url
+        update_job_progress(job_id, output_video=output_video_url)
 
         if report:
+            current_progress = get_job_progress(job_id) or {}
             tracking_report = ReportGenerator.save_to_database(
             report_data=report,
             output_video_url=output_video_url,
             input_video_url=input_video_url,
             selected_track_id=track_id,
-            frame_events=progress.get("new_track_events",[]),
+            frame_events=current_progress.get("new_track_events",[]),
             # Resolve groups only after processing ends: a later upper-half
             # crop may have merged identities that initially looked separate.
             identity_groups=similarity_index.get_groups(),
+            # Pairs in the 70%-to-auto-threshold range are persisted for the
+            # manual grouping review UI added in the following step.
+            manual_grouping_suggestions=(
+                similarity_index.get_manual_grouping_suggestions()
+            ),
             # Reuse the report that received every active-track frame while
             # processing; creating a second report loses the video timeline.
             tracking_report=TrackingReport.objects.get(id=report_id),
@@ -478,111 +511,128 @@ def _run_processing(
             # Event cards are rendered while processing uses a temporary
             # report.  Replace that ID once the final report and its identity
             # groups have been persisted, before selection becomes available.
-            for event in progress.get("new_track_events", []):
+            for event in current_progress.get("new_track_events", []):
                 event["report_id"] = tracking_report.id
-            progress["report_id"] = tracking_report.id
-            progress["report"] = ReportGenerator.serialize_tracking_report(
-                tracking_report
+            update_job_progress(
+                job_id,
+                new_track_events=current_progress.get("new_track_events", []),
+                report_id=tracking_report.id,
+                report=ReportGenerator.serialize_tracking_report(
+                    tracking_report
+                ),
+                manual_grouping_suggestions=(
+                    _serialize_manual_grouping_suggestions(tracking_report)
+                ),
+                message=None,
             )
-            progress["message"] = None
         else:
-            progress["report_id"] = None
-            progress["report"] = None
-            progress["message"] = "Track ID was not found."
-        progress["progress"] = 100
-        progress["status"] = "Completed"
+            update_job_progress(
+                job_id,
+                report_id=None,
+                report=None,
+                message="Track ID was not found.",
+            )
+        update_job_progress(job_id, progress=100, status="Completed")
         
     except Exception as exc:
-        progress["status"] = "Failed"
-        progress["error"] = str(exc)
+        update_job_progress(job_id, status="Failed", error=str(exc))
     finally:
         close_old_connections()
-        with _processing_lock:
-            _is_processing = False
+        finish_user_job(user_id, job_id)
 
-
+@jwt_login_required
 def upload_video(request):
-    global _is_processing
-
     if request.method == "POST":
         form = VideoUploadForm(request.POST, request.FILES)
 
         if form.is_valid():
-            with _processing_lock:
-                if _is_processing:
-                    if is_ajax(request):
-                        return JsonResponse(
-                            {
-                                "success": False,
-                                "error": "A video is already being processed.",
-                            },
-                            status=409,
-                        )
-                    return render(
-                        request,
-                        "tracker/upload.html",
+            user_id = request.user.id
+            job_id = str(uuid.uuid4())
+            if not start_user_job(user_id, job_id):
+                if is_ajax(request):
+                    return JsonResponse(
                         {
-                            "form": form,
-                            "image_form": ImageUploadForm(),
-                            "error": "A video is already being processed.",
+                            "success": False,
+                            "error": "You already have a video being processed.",
                         },
+                        status=409,
                     )
-                _is_processing = True
+                return render(
+                    request,
+                    "tracker/upload.html",
+                    {
+                        "form": form,
+                        "image_form": ImageUploadForm(),
+                        "error": "You already have a video being processed.",
+                    },
+                )
 
-            video = form.cleaned_data["video"]
-            start_time = form.cleaned_data["start_time"] or None
-            end_time = form.cleaned_data["end_time"] or None
-            track_id = form.cleaned_data["track_id"]
+            try:
+                video = form.cleaned_data["video"]
+                start_time = form.cleaned_data["start_time"] or None
+                end_time = form.cleaned_data["end_time"] or None
+                track_id = form.cleaned_data["track_id"]
 
-            # Create a new output workspace for this uploaded video
-            video_version = get_next_video_version()
+                # Create a new output workspace for this uploaded video
+                video_version = get_next_video_version()
 
-            video_dirs = get_video_directories(
-                video_version
-            )
+                video_dirs = get_video_directories(
+                    video_version
+                )
 
-            fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, "uploads"))
-            filename = fs.save(video.name, video)
+                fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, "uploads"))
+                filename = fs.save(video.name, video)
 
-            input_path = os.path.join(settings.MEDIA_ROOT, "uploads", filename)
-            output_filename = f"processed_{filename}"
+                input_path = os.path.join(settings.MEDIA_ROOT, "uploads", filename)
+                output_filename = f"processed_{filename}"
 
-            output_path = os.path.join(video_dirs["output_video"],output_filename,)
-            input_video_url = (f"/media/uploads/{filename}")
-            output_video_url = (
-                f"/media/videos/"
-                f"{video_version}/output_video/"
-                f"{output_filename}"
-            )
+                output_path = os.path.join(video_dirs["output_video"],output_filename,)
+                input_video_url = (f"/media/uploads/{filename}")
+                output_video_url = (
+                    f"/media/videos/"
+                    f"{video_version}/output_video/"
+                    f"{output_filename}"
+                )
 
-            tracking_report = ReportGenerator.create_processing_report(
-                output_video_url=output_video_url,
-                input_video_url=input_video_url,
-                selected_track_id=track_id,
-            )
-            _reset_progress()
+                tracking_report = ReportGenerator.create_processing_report(
+                    output_video_url=output_video_url,
+                    input_video_url=input_video_url,
+                    selected_track_id=track_id,
+                )
+                update_job_progress(job_id, report_id=tracking_report.id)
 
-            thread = threading.Thread(
-                target=_run_processing,
-                args=(
-                    input_path,
-                    output_path,
-                    output_filename,
-                    filename,
-                    start_time,
-                    end_time,
-                    track_id,
-                    tracking_report.id,
-                    video_version,       
+                thread = threading.Thread(
+                    target=_run_processing,
+                    args=(
+                        job_id,
+                        user_id,
+                        input_path,
+                        output_path,
+                        output_filename,
+                        filename,
+                        start_time,
+                        end_time,
+                        track_id,
+                        tracking_report.id,
+                        video_version,
 
 
-                ),
-                daemon=True,
-            )
-            thread.start()
+                    ),
+                    daemon=True,
+                )
+                thread.start()
+            except Exception:
+                finish_user_job(user_id, job_id)
+                raise
 
             if is_ajax(request):
-                return JsonResponse({"success": True, "status": "Processing"})
+                return JsonResponse(
+                    {
+                        "success": True,
+                        "status": "Processing",
+                        "job_id": job_id,
+                    }
+                )
 
             return render(
                 request,
@@ -651,8 +701,45 @@ def detect_image(request):
     )
 
 
+@jwt_api_login_required
 def get_progress(request):
-    return JsonResponse(progress)
+    job_id = request.GET.get("job_id")
+    if not job_id:
+        return JsonResponse(
+            {"success": False, "error": "Missing progress job id."},
+            status=400,
+        )
+
+    job_progress = get_job_progress(job_id, request.user.id)
+    if job_progress is None:
+        return JsonResponse(
+            {"success": False, "error": "Progress job was not found."},
+            status=404,
+        )
+
+    return JsonResponse(job_progress)
+
+
+def _serialize_manual_grouping_suggestions(report):
+    """Expose unresolved review-range OSNet pairs after processing completes."""
+    return list(
+        report.manual_grouping_suggestions.filter(
+            is_resolved=False,
+            status=ManualGroupingSuggestion.Status.PENDING,
+        ).values(
+            "id",
+            "report_id",
+            "first_group__group_key",
+            "second_group__group_key",
+            "first_track_id",
+            "first_frame_number",
+            "first_image_url",
+            "second_track_id",
+            "second_frame_number",
+            "second_image_url",
+            "similarity",
+        )
+    )
 
 
 def _serialize_identity_groups_for_video(report, identity_group_ids):
@@ -660,6 +747,7 @@ def _serialize_identity_groups_for_video(report, identity_group_ids):
     groups = list(
         report.identity_groups.filter(
             group_key__in=identity_group_ids,
+            is_active=True,
         ).prefetch_related("tracks__frame_events")
     )
 
@@ -690,6 +778,435 @@ def _serialize_identity_groups_for_video(report, identity_group_ids):
         )
 
     return serialized_groups
+
+
+def _serialize_representative_event(report, group):
+    """Return the persisted snapshot needed to restore one UI thumbnail."""
+    event = (
+        TrackFrameEvent.objects.filter(
+            track__report=report,
+            track__track_id=group.representative_track_id,
+            thumbnail_url__gt="",
+        )
+        .order_by("frame_number", "id")
+        .first()
+    )
+    if not event:
+        return None
+
+    return {
+        "track_id": event.track.track_id,
+        "report_id": report.id,
+        "frame": event.frame_number,
+        "time_sec": round(event.timestamp, 2),
+        "image_url": event.thumbnail_url,
+        "person_crop_url": event.cropped_image_url,
+        "full_frame_url": event.full_frame_url,
+        "identity_group_id": group.group_key,
+        "is_identity_representative": True,
+        "similar_persons": [],
+    }
+
+
+def dismiss_manual_grouping_suggestion(request):
+    """Hide an irrelevant suggestion without changing either identity group."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"success": False, "error": "Method not allowed."},
+            status=405,
+        )
+
+    try:
+        report_id = int(request.POST.get("report_id"))
+        suggestion_id = int(request.POST.get("suggestion_id"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "error": "Invalid report or suggestion."},
+            status=400,
+        )
+
+    updated = ManualGroupingSuggestion.objects.filter(
+        id=suggestion_id,
+        report_id=report_id,
+        is_resolved=False,
+        status=ManualGroupingSuggestion.Status.PENDING,
+    ).update(
+        status=ManualGroupingSuggestion.Status.DISMISSED,
+        is_resolved=True,
+    )
+    if not updated:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "This grouping suggestion is no longer available.",
+            },
+            status=404,
+        )
+
+    report = TrackingReport.objects.get(id=report_id)
+    return JsonResponse(
+        {
+            "success": True,
+            "remaining_suggestions": _serialize_manual_grouping_suggestions(report),
+        }
+    )
+
+
+def merge_manual_identity_groups(request):
+    """Merge the two groups shown by one confirmed manual suggestion."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"success": False, "error": "Method not allowed."},
+            status=405,
+        )
+
+    try:
+        report_id = int(request.POST.get("report_id"))
+        suggestion_id = int(request.POST.get("suggestion_id"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "error": "Invalid report or suggestion."},
+            status=400,
+        )
+
+    try:
+        with transaction.atomic():
+            suggestion = (
+                ManualGroupingSuggestion.objects.select_for_update()
+                .select_related("report", "first_group", "second_group")
+                .get(
+                    id=suggestion_id,
+                    report_id=report_id,
+                    is_resolved=False,
+                    status=ManualGroupingSuggestion.Status.PENDING,
+                )
+            )
+            first_group = suggestion.first_group
+            second_group = suggestion.second_group
+
+            # Group keys follow initial encounter order, so the lower key has
+            # the earliest representative and remains visible after merging.
+            primary_group, duplicate_group = sorted(
+                (first_group, second_group),
+                key=lambda group: group.group_key,
+            )
+
+            moved_track_ids = list(PersonTrackStats.objects.filter(
+                report_id=report_id,
+                identity_group=duplicate_group,
+            ).values_list("track_id", flat=True))
+            affected_suggestions = list(
+                ManualGroupingSuggestion.objects.filter(
+                    report_id=report_id,
+                    status=ManualGroupingSuggestion.Status.PENDING,
+                )
+                .filter(
+                    Q(first_group__in=[primary_group, duplicate_group])
+                    | Q(second_group__in=[primary_group, duplicate_group])
+                )
+                .values_list("id", flat=True)
+            )
+            merge_history = ManualIdentityGroupMerge.objects.create(
+                report_id=report_id,
+                source_suggestion=suggestion,
+                primary_group=primary_group,
+                duplicate_group=duplicate_group,
+                moved_track_ids=json.dumps(moved_track_ids),
+                resolved_suggestion_ids=json.dumps(affected_suggestions),
+            )
+            PersonTrackStats.objects.filter(
+                report_id=report_id,
+                track_id__in=moved_track_ids,
+            ).update(identity_group=primary_group)
+
+            # Keep the original group for undo, but remove it from all active
+            # behavior and from the representative-thumbnail list.
+            duplicate_group.is_active = False
+            duplicate_group.merged_into = primary_group
+            duplicate_group.save(update_fields=["is_active", "merged_into"])
+
+            # All review candidates involving either group are no longer
+            # actionable once the user confirms this manual merge.
+            ManualGroupingSuggestion.objects.filter(
+                id__in=affected_suggestions,
+            ).update(
+                is_resolved=True,
+                status=ManualGroupingSuggestion.Status.GROUPED,
+            )
+
+            serialized_report = ReportGenerator.serialize_tracking_report(
+                suggestion.report
+            )
+            update_report_for_report_id(report_id, serialized_report)
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "report_id": report_id,
+                    "identity_group_id": primary_group.group_key,
+                    "duplicate_identity_group_id": duplicate_group.group_key,
+                    "representative_track_id": primary_group.representative_track_id,
+                    "manual_merge_id": merge_history.id,
+                    "output_video": suggestion.report.output_video,
+                    "report": serialized_report,
+                    "identity_groups": _serialize_identity_groups_for_video(
+                        suggestion.report,
+                        [primary_group.group_key],
+                    ),
+                    "remaining_suggestions": _serialize_manual_grouping_suggestions(
+                        suggestion.report
+                    ),
+                }
+            )
+
+    except ManualGroupingSuggestion.DoesNotExist:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "This grouping suggestion is no longer available.",
+            },
+            status=404,
+        )
+
+
+def undo_manual_identity_group_merge(request):
+    """Reverse one confirmed manual merge without touching OSNet groups."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"success": False, "error": "Method not allowed."}, status=405
+        )
+
+    try:
+        report_id = int(request.POST.get("report_id"))
+        merge_id = int(request.POST.get("manual_merge_id"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "error": "Invalid report or manual merge."},
+            status=400,
+        )
+
+    try:
+        with transaction.atomic():
+            merge = (
+                ManualIdentityGroupMerge.objects.select_for_update()
+                .select_related("report", "primary_group", "duplicate_group")
+                .get(id=merge_id, report_id=report_id, is_undone=False)
+            )
+
+            duplicate_group = merge.duplicate_group
+            primary_group = merge.primary_group
+            moved_track_ids = json.loads(merge.moved_track_ids)
+            resolved_suggestion_ids = json.loads(merge.resolved_suggestion_ids)
+            if duplicate_group.merged_into_id != primary_group.id:
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "This merge can no longer be undone safely.",
+                    },
+                    status=409,
+                )
+
+            PersonTrackStats.objects.filter(
+                report_id=report_id,
+                track_id__in=moved_track_ids,
+                identity_group=primary_group,
+            ).update(identity_group=duplicate_group)
+            duplicate_group.is_active = True
+            duplicate_group.merged_into = None
+            duplicate_group.save(update_fields=["is_active", "merged_into"])
+
+            ManualGroupingSuggestion.objects.filter(
+                id__in=resolved_suggestion_ids,
+                status=ManualGroupingSuggestion.Status.GROUPED,
+            ).update(
+                is_resolved=False,
+                status=ManualGroupingSuggestion.Status.PENDING,
+            )
+            merge.is_undone = True
+            merge.undone_at = timezone.now()
+            merge.save(update_fields=["is_undone", "undone_at"])
+
+            serialized_report = ReportGenerator.serialize_tracking_report(
+                merge.report
+            )
+            update_report_for_report_id(report_id, serialized_report)
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "output_video": merge.report.output_video,
+                    "report": serialized_report,
+                    "restored_event": _serialize_representative_event(
+                        merge.report, duplicate_group
+                    ),
+                    "remaining_suggestions": _serialize_manual_grouping_suggestions(
+                        merge.report
+                    ),
+                }
+            )
+    except ManualIdentityGroupMerge.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "error": "This manual merge is no longer available."},
+            status=404,
+        )
+
+
+def merge_selected_identity_groups(request):
+    """Permanently merge identity groups selected from the main thumbnails."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"success": False, "error": "Method not allowed."},
+            status=405,
+        )
+
+    try:
+        report_id = int(request.POST.get("report_id"))
+        identity_group_ids = sorted({
+            int(group_id)
+            for group_id in json.loads(request.POST.get("identity_group_ids"))
+        })
+        if len(identity_group_ids) < 2:
+            raise ValueError
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return JsonResponse(
+            {"success": False, "error": "Select at least two valid groups."},
+            status=400,
+        )
+
+    try:
+        with transaction.atomic():
+            report = TrackingReport.objects.select_for_update().get(id=report_id)
+            groups = list(
+                PersonIdentityGroup.objects.select_for_update()
+                .filter(
+                    report=report,
+                    group_key__in=identity_group_ids,
+                    is_active=True,
+                )
+                .prefetch_related("tracks")
+            )
+            found_group_ids = {group.group_key for group in groups}
+            missing_group_ids = set(identity_group_ids) - found_group_ids
+            if missing_group_ids:
+                missing_ids = ", ".join(
+                    str(group_id) for group_id in sorted(missing_group_ids)
+                )
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": f"Identity group(s) not found: {missing_ids}.",
+                    },
+                    status=404,
+                )
+
+            group_track_ids = {
+                group.id: [
+                    track.track_id
+                    for track in group.tracks.all()
+                ]
+                for group in groups
+            }
+            groups = [
+                group for group in groups
+                if group_track_ids.get(group.id)
+            ]
+            if len(groups) < 2:
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "At least two selected groups must contain tracks.",
+                    },
+                    status=400,
+                )
+
+            primary_group = min(
+                groups,
+                key=lambda group: min(group_track_ids[group.id]),
+            )
+            representative_track_id = min(
+                track_id
+                for track_ids in group_track_ids.values()
+                for track_id in track_ids
+            )
+            duplicate_groups = [
+                group for group in groups
+                if group.id != primary_group.id
+            ]
+            duplicate_group_ids = [group.group_key for group in duplicate_groups]
+
+            affected_suggestions = list(
+                ManualGroupingSuggestion.objects.filter(
+                    report=report,
+                    status=ManualGroupingSuggestion.Status.PENDING,
+                )
+                .filter(
+                    Q(first_group__in=groups) | Q(second_group__in=groups)
+                )
+                .values_list("id", flat=True)
+            )
+
+            merge_history_ids = []
+            for duplicate_group in duplicate_groups:
+                moved_track_ids = group_track_ids[duplicate_group.id]
+                merge_history = ManualIdentityGroupMerge.objects.create(
+                    report=report,
+                    source_suggestion=None,
+                    primary_group=primary_group,
+                    duplicate_group=duplicate_group,
+                    moved_track_ids=json.dumps(moved_track_ids),
+                    resolved_suggestion_ids=json.dumps(affected_suggestions),
+                )
+                merge_history_ids.append(merge_history.id)
+                PersonTrackStats.objects.filter(
+                    report=report,
+                    track_id__in=moved_track_ids,
+                ).update(identity_group=primary_group)
+                duplicate_group.is_active = False
+                duplicate_group.merged_into = primary_group
+                duplicate_group.save(update_fields=["is_active", "merged_into"])
+
+            if primary_group.representative_track_id != representative_track_id:
+                primary_group.representative_track_id = representative_track_id
+                primary_group.save(update_fields=["representative_track_id"])
+
+            ManualGroupingSuggestion.objects.filter(
+                id__in=affected_suggestions,
+            ).update(
+                is_resolved=True,
+                status=ManualGroupingSuggestion.Status.GROUPED,
+            )
+
+            serialized_report = ReportGenerator.serialize_tracking_report(report)
+            update_report_for_report_id(report_id, serialized_report)
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "report_id": report_id,
+                    "identity_group_id": primary_group.group_key,
+                    "duplicate_identity_group_ids": duplicate_group_ids,
+                    "representative_track_id": representative_track_id,
+                    "manual_merge_ids": merge_history_ids,
+                    "output_video": report.output_video,
+                    "report": serialized_report,
+                    "representative_event": _serialize_representative_event(
+                        report,
+                        primary_group,
+                    ),
+                    "identity_groups": _serialize_identity_groups_for_video(
+                        report,
+                        [primary_group.group_key],
+                    ),
+                    "remaining_suggestions": _serialize_manual_grouping_suggestions(
+                        report
+                    ),
+                }
+            )
+    except TrackingReport.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "error": "Report not found."},
+            status=404,
+        )
 
 
 def generate_separate_video(request):
@@ -745,6 +1262,7 @@ def generate_separate_video(request):
             known_group_ids = set(
                 report.identity_groups.filter(
                     group_key__in=identity_group_ids,
+                    is_active=True,
                 ).values_list("group_key", flat=True)
             )
             missing_group_ids = set(identity_group_ids) - known_group_ids
@@ -829,7 +1347,10 @@ def generate_separate_video(request):
         # CHECK DATABASE FIRST
         # ---------------------------------------------------------
 
-        if track_stats.separate_video_url:
+        if (
+            track_stats.separate_video_url
+            and "_highlighted.mp4" in track_stats.separate_video_url
+        ):
 
             print(
                 f"[SEPARATE VIDEO] "

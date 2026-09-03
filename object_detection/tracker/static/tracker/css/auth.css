@@ -1,0 +1,304 @@
+/* ==========================================================================
+   Auth UI — tracking-HUD theme
+   Palette:
+     --bg        #10141C  deep slate
+     --panel     #171D28  card / left panel
+     --panel-2   #1D2531  input fields
+     --accent    #FF9F1C  bounding-box amber (primary)
+     --accent-2  #4CD9C0  telemetry teal (links / secondary)
+     --text      #E7EAEE  primary text
+     --muted     #7C8798  secondary text
+     --danger    #FF6B6B  errors
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #10141C;
+  --panel: #171D28;
+  --panel-2: #1D2531;
+  --border: #262F3D;
+  --accent: #FF9F1C;
+  --accent-2: #4CD9C0;
+  --text: #E7EAEE;
+  --muted: #7C8798;
+  --danger: #FF6B6B;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body.auth-body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  display: flex;
+  align-items: stretch;
+}
+
+.auth-shell {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* ---------- Left: HUD panel ---------- */
+.auth-hud {
+  position: relative;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 48px;
+}
+
+.auth-hud__grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 42px 42px;
+  opacity: 0.35;
+  mask-image: radial-gradient(circle at 30% 30%, black, transparent 75%);
+}
+
+.auth-hud__eyebrow {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--accent-2);
+  text-transform: uppercase;
+}
+
+.auth-hud__title {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 600;
+  line-height: 1.15;
+  margin: 18px 0 0;
+  max-width: 9ch;
+}
+
+.auth-hud__title span { color: var(--accent); }
+
+.auth-hud__sub {
+  position: relative;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+  max-width: 34ch;
+  margin-top: 16px;
+}
+
+/* Reticle: the signature element - a scanning bounding box with corner
+   brackets, like the ones this app draws around tracked subjects. */
+.reticle {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  align-self: center;
+  margin: 24px 0;
+}
+
+.reticle__corner {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border: 2px solid var(--accent);
+  opacity: 0.9;
+}
+.reticle__corner--tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+.reticle__corner--tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+.reticle__corner--bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+.reticle__corner--br { bottom: 0; right: 0; border-left: none; border-top: none; }
+
+.reticle__label {
+  position: absolute;
+  top: -26px;
+  left: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+}
+
+.reticle__scanline {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-2), transparent);
+  animation: scan 3.2s ease-in-out infinite;
+  opacity: 0.8;
+}
+
+@keyframes scan {
+  0%   { top: 4%; }
+  50%  { top: 92%; }
+  100% { top: 4%; }
+}
+
+.auth-hud__footer {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  letter-spacing: 0.04em;
+}
+
+.auth-hud__footer .dot { color: var(--accent-2); }
+
+/* ---------- Right: form panel ---------- */
+.auth-formwrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+}
+
+.auth-card__tag {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.auth-card h1 {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 600;
+  margin: 8px 0 28px;
+}
+
+.field {
+  margin-bottom: 18px;
+}
+
+.field label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.field__input-wrap {
+  position: relative;
+}
+
+.field input {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.field input::placeholder { color: #4B5568; }
+
+.field input:focus {
+  border-color: var(--accent);
+}
+
+/* Corner-bracket "lock on" effect echoing the reticle, on focus */
+.field__input-wrap::before,
+.field__input-wrap::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+.field__input-wrap::before { top: -4px; left: -4px; border-right: none; border-bottom: none; }
+.field__input-wrap::after { bottom: -4px; right: -4px; border-left: none; border-top: none; }
+.field__input-wrap:focus-within::before,
+.field__input-wrap:focus-within::after { opacity: 1; }
+
+.field__error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  min-height: 14px;
+}
+
+.auth-submit {
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: 4px;
+  border: none;
+  background: var(--accent);
+  color: #14100A;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.05s ease;
+}
+.auth-submit:hover { filter: brightness(1.08); }
+.auth-submit:active { transform: translateY(1px); }
+.auth-submit:disabled { opacity: 0.55; cursor: default; }
+
+.auth-banner {
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 107, 107, 0.4);
+  background: rgba(255, 107, 107, 0.08);
+  color: var(--danger);
+  font-size: 13px;
+  display: none;
+}
+.auth-banner.is-visible { display: block; }
+
+.auth-switch {
+  margin-top: 22px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+.auth-switch a { color: var(--accent-2); text-decoration: none; }
+.auth-switch a:hover { text-decoration: underline; }
+
+.field:focus-visible, input:focus-visible, a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reticle__scanline { animation: none; top: 50%; }
+}
+
+@media (max-width: 860px) {
+  .auth-shell { grid-template-columns: 1fr; }
+  .auth-hud { min-height: 260px; padding: 32px; }
+  .reticle { display: none; }
+}

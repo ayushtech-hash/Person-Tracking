@@ -53,6 +53,10 @@
             margin-bottom:32px;
         }
 
+        .app-header__title{
+            min-width:0;
+        }
+
         header.app-header .icon{
             width:46px;
             height:46px;
@@ -82,6 +86,129 @@
             margin:2px 0 0;
             font-size:14px;
             color:var(--text-muted);
+        }
+
+        .account-menu{
+            position:relative;
+            margin-left:auto;
+            flex-shrink:0;
+        }
+
+        .account-menu__toggle{
+            display:flex;
+            align-items:center;
+            gap:10px;
+            background:#fff;
+            color:var(--text);
+            border:1px solid var(--border);
+            box-shadow:var(--shadow);
+            padding:8px 12px 8px 8px;
+        }
+
+        .account-menu__toggle:hover:not(:disabled){
+            box-shadow:var(--shadow-lg);
+        }
+
+        .account-menu__avatar{
+            width:30px;
+            height:30px;
+            border-radius:50%;
+            background:linear-gradient(135deg, var(--primary), #8b5cf6);
+            color:#fff;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            font-weight:700;
+            text-transform:uppercase;
+        }
+
+        .account-menu__name{
+            max-width:140px;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+        }
+
+        .account-menu__chevron{
+            color:var(--text-muted);
+            font-size:12px;
+        }
+
+        .account-menu__dropdown{
+            position:absolute;
+            top:calc(100% + 10px);
+            right:0;
+            z-index:30;
+            display:none;
+            width:260px;
+            background:#fff;
+            border:1px solid var(--border);
+            border-radius:12px;
+            box-shadow:var(--shadow-lg);
+            overflow:hidden;
+        }
+
+        .account-menu.is-open .account-menu__dropdown{
+            display:block;
+        }
+
+        .account-menu__summary{
+            padding:14px 16px;
+            border-bottom:1px solid var(--border);
+        }
+
+        .account-menu__summary strong,
+        .account-profile strong{
+            display:block;
+            font-size:14px;
+            color:var(--text);
+        }
+
+        .account-menu__summary span,
+        .account-profile span{
+            display:block;
+            margin-top:2px;
+            color:var(--text-muted);
+            font-size:13px;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+        }
+
+        .account-menu__item{
+            width:100%;
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            background:#fff;
+            color:var(--text);
+            border-radius:0;
+            box-shadow:none;
+            padding:12px 16px;
+            text-align:left;
+        }
+
+        .account-menu__item:hover:not(:disabled){
+            background:#f7f8fc;
+            transform:none;
+            box-shadow:none;
+        }
+
+        .account-menu__item--danger{
+            color:#b42318;
+            border-top:1px solid var(--border);
+        }
+
+        .account-profile{
+            padding:0 16px 14px;
+        }
+
+        .account-profile__panel{
+            margin-top:8px;
+            padding:12px;
+            background:#f7f8fc;
+            border:1px solid var(--border);
+            border-radius:10px;
         }
 
         h2{
@@ -584,11 +711,12 @@
             /* Preserve the entire person crop inside the fixed thumbnail area. */
             object-fit:contain;
             object-position:center;
+            transform:scale(1.3);
             transition:transform 0.2s ease;
         }
 
         .new-track-event .thumb-wrap:hover img {
-            transform:scale(1);
+            transform:scale(1.3);
         }
 
         .new-track-event {
@@ -748,6 +876,162 @@
             margin-top:7px;
             color:var(--text-muted);
             font-size:11px;
+        }
+
+
+        /* Matched upper-half crops: four-column crop grid, growing vertically as needed. */
+        #tracked-video-group-list-main {
+            display:grid;
+            grid-template-columns:1fr;
+            gap:10px;
+            margin-top:16px;
+        }
+
+        #tracked-video-group-list-main .tracked-video-group {
+            min-width:0;
+        }
+
+        #tracked-video-group-list-main .tracked-video-group-crops {
+            display:grid;
+            grid-template-columns:repeat(4, minmax(0, 1fr));
+            gap:8px;
+            overflow:visible;
+        }
+
+        #tracked-video-group-list-main .tracked-video-group-crops figure {
+            width:auto;
+            min-width:0;
+            flex:initial;
+        }
+
+        #tracked-video-group-list-main .tracked-video-group-crops img {
+            width:100%;
+            height:auto;
+            aspect-ratio:1 / 1;
+        }
+
+        @media (max-width:600px) {
+            #tracked-video-group-list-main {
+                grid-template-columns:1fr;
+            }
+        }
+
+        #manual-grouping-suggestions {
+            display:grid;
+            grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));
+            gap:10px;
+            margin-top:16px;
+        }
+
+        .manual-grouping-suggestion {
+            position:relative;
+            padding:10px;
+            border:1px solid #f2c46d;
+            border-radius:10px;
+            background:#fffaf0;
+        }
+
+        .manual-grouping-suggestion-title {
+            margin-bottom:8px;
+            font-size:12px;
+            font-weight:700;
+        }
+
+        .manual-grouping-suggestion-title span {
+            color:#a15c00;
+        }
+
+        .manual-grouping-suggestion-images {
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:6px;
+        }
+
+        .manual-grouping-suggestion-images figure {
+            margin:0;
+        }
+
+        .manual-grouping-suggestion-images img {
+            display:block;
+            width:100%;
+            aspect-ratio:1 / 1;
+            object-fit:contain;
+            border:1px solid var(--border);
+            border-radius:7px;
+            background:#fff;
+        }
+
+        .manual-grouping-suggestion-images figcaption {
+            margin-top:4px;
+            color:var(--text-muted);
+            font-size:10px;
+            line-height:1.25;
+        }
+
+        .manual-grouping-action {
+            width:100%;
+            margin-top:10px;
+            padding:8px 10px;
+            border-radius:8px;
+            background:#a15c00;
+            color:#fff;
+            font-size:12px;
+            font-weight:700;
+        }
+
+        .manual-grouping-action:hover:not(:disabled) {
+            background:#804900;
+        }
+
+        .manual-grouping-action:disabled {
+            cursor:wait;
+            opacity:0.65;
+        }
+
+        #manual-grouping-undo {
+            display:grid;
+            gap:8px;
+            margin:0 0 14px;
+        }
+
+        .manual-grouping-undo-entry {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:10px;
+            padding:9px 10px;
+            border:1px solid #d6c5a4;
+            border-radius:8px;
+            background:#fffdf8;
+            font-size:12px;
+        }
+
+        .manual-grouping-undo-action {
+            width:auto;
+            margin:0;
+            padding:7px 13px;
+        }
+
+        .manual-grouping-dismiss {
+            position:absolute;
+            top:7px;
+            right:7px;
+            width:24px;
+            height:24px;
+            padding:0;
+            border:0;
+            border-radius:50%;
+            background:transparent;
+            color:var(--text-muted);
+            font-size:20px;
+            line-height:1;
+            box-shadow:none;
+        }
+
+        .manual-grouping-dismiss:hover:not(:disabled) {
+            background:#f4dfbd;
+            color:#804900;
+            transform:none;
         }
 
         @media (min-width:1600px){
@@ -1074,6 +1358,22 @@
             .card{
                 padding:18px;
             }
+            header.app-header{
+                flex-wrap:wrap;
+            }
+            .account-menu{
+                width:100%;
+                margin-left:0;
+            }
+            .account-menu__toggle{
+                width:100%;
+                justify-content:space-between;
+            }
+            .account-menu__dropdown{
+                left:0;
+                right:auto;
+                width:100%;
+            }
         }
 
     </style>
@@ -1085,6 +1385,10 @@
     data-progress-url="{% url 'get_progress' %}"
     data-image-url="{% url 'detect_image' %}"
     data-separate-video-url="{% url 'generate_separate_video' %}"
+    data-selected-group-url="{% url 'merge_selected_identity_groups' %}"
+    data-manual-group-url="{% url 'merge_manual_identity_groups' %}"
+    data-undo-manual-group-url="{% url 'undo_manual_identity_group_merge' %}"
+    data-dismiss-manual-suggestion-url="{% url 'dismiss_manual_grouping_suggestion' %}"
 ></div>
 
 
@@ -1099,9 +1403,51 @@
             <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
         </svg>
     </div>
-    <div>
+    <div class="app-header__title">
         <h1>Person Tracking System</h1>
         <p>Detect and track people in images and video</p>
+    </div>
+    <div class="account-menu" id="account-menu">
+        <button
+            type="button"
+            class="account-menu__toggle"
+            id="account-menu-toggle"
+            aria-haspopup="true"
+            aria-expanded="false"
+        >
+            <span class="account-menu__avatar">{{ request.user.username|first|default:"U" }}</span>
+            <span class="account-menu__name">{{ request.user.username|default:"User" }}</span>
+            <span class="account-menu__chevron">v</span>
+        </button>
+        <div class="account-menu__dropdown" role="menu">
+            <div class="account-menu__summary">
+                <strong>{{ request.user.username|default:"User" }}</strong>
+                <span>{{ request.user.email|default:"No email added" }}</span>
+            </div>
+            <button
+                type="button"
+                class="account-menu__item"
+                id="account-profile-toggle"
+                aria-expanded="false"
+            >
+                View Profile
+                <span>&gt;</span>
+            </button>
+            <div class="account-profile" id="account-profile-panel" hidden>
+                <div class="account-profile__panel">
+                    <strong>{{ request.user.username|default:"User" }}</strong>
+                    <span>{{ request.user.email|default:"No email added" }}</span>
+                    <span>Joined {{ request.user.date_joined|date:"M d, Y" }}</span>
+                </div>
+            </div>
+            <button
+                type="button"
+                class="account-menu__item account-menu__item--danger"
+                id="account-logout-button"
+            >
+                Logout
+            </button>
+        </div>
     </div>
 </header>
 
@@ -1261,14 +1607,6 @@
     </video>
     {% endif %}
     </div>
-    <section
-        id="tracked-video-groups-main"
-        aria-label="OSNet identity groups included in the tracked video"
-        style="display:none;"
-    >
-        <h3>Matched upper-half crops</h3>
-        <div id="tracked-video-group-list-main"></div>
-    </section>
 </div>
 </div>
 
@@ -1316,16 +1654,6 @@
         </button>
     </div>
     <div id="new-track-events"></div>
-</div>
-</div>
-
-<div class="split-right">
-<div id="similar-person-section" class="card result-card">
-    <h2>Similar Person Matches</h2>
-    <p style="color:var(--text-muted); font-size:13px; margin:0;">
-        OSNet suggestions for new tracking IDs that may be the same person.
-    </p>
-    <div id="similar-person-matches"></div>
 </div>
 <div class="card result-card">
 <h2>Tracking Result</h2>
@@ -1438,6 +1766,35 @@
 
 </div>
 </div>
+</div>
+
+<div class="split-right">
+<div id="similar-person-section" class="card result-card">
+    <h2>Similar Person Matches</h2>
+    <p style="color:var(--text-muted); font-size:13px; margin:0;">
+        OSNet suggestions for new tracking IDs that may be the same person.
+    </p>
+    <div id="similar-person-matches"></div>
+</div>
+<section
+    id="tracked-video-groups-main"
+    class="card result-card"
+    aria-label="OSNet identity groups included in the tracked video"
+    style="display:none;"
+>
+    <h2>Matched upper-half crops</h2>
+    <div id="tracked-video-group-list-main"></div>
+</section>
+<div id="manual-grouping-section" class="card result-card" style="display:none;">
+    <h2>Manual Grouping Suggestions</h2>
+    <p style="color:var(--text-muted); font-size:13px; margin:0;">
+        These upper-half crops are 70–79% similar. Review them after processing;
+        group only the people you confirm are the same.
+    </p>
+    <div id="manual-grouping-undo"></div>
+    <div id="manual-grouping-suggestions"></div>
+</div>
+
 </div>
 
 </div>
@@ -1590,9 +1947,10 @@
 
 <script src="{% static 'tracker/js/mode-toggle.js' %}"></script>
 <script src="{% static 'tracker/js/image.js' %}"></script>
-<script src="{% static 'tracker/js/video.js' %}?v=reid-live-matches-1"></script>
+<script src="{% static 'tracker/js/video.js' %}?v=progress-auth-refresh-1"></script>
 <script src="{% static 'tracker/js/lightbox.js' %}"></script>
 <script src="{% static 'tracker/js/track-person.js' %}"></script>
+<script src="{% static 'tracker/js/account.js' %}?v=account-menu-2"></script>
 
 </body>
 </html>
