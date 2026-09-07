@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+from decouple import config
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -22,15 +23,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-ivx#m58@!5f7#p^pw_0svqw-bp0@5o2a)uhcq6h=09pj*a68^&'
+SECRET_KEY = config('SECRET_KEY')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['4d65-150-129-146-122.ngrok-free.app','127.0.0.1:8000','127.0.0.1']
-CSRF_TRUSTED_ORIGINS = [
-    "https://4d65-150-129-146-122.ngrok-free.app",
-]
+ALLOWED_HOSTS = config('ALLOWED_HOSTS',default='127.0.0.1,localhost').split(',')
+
+
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS',default='').split(',')
 
 # Application definition
     
@@ -93,11 +93,11 @@ WSGI_APPLICATION = 'object_detection.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'my_video_app_db',       
-        'USER': 'postgres',               
-        'PASSWORD': '',                  
-        'HOST': '127.0.0.1',              
-        'PORT': '5432',                  
+        'NAME': config('DB_NAME'),
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
+        'HOST': config('DB_HOST', default='127.0.0.1'),
+        'PORT': config('DB_PORT', default='5432'),
     }
 }
 
@@ -177,8 +177,12 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ACCESS_TOKEN_LIFETIME': timedelta(
+        hours=config('ACCESS_TOKEN_LIFETIME_HOURS', cast=int)
+    ),
+    'REFRESH_TOKEN_LIFETIME': timedelta(
+        days=config('REFRESH_TOKEN_LIFETIME_DAYS', cast=int)
+    ),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
@@ -187,5 +191,5 @@ SIMPLE_JWT = {
 # Cookie names/flags used by tracker/services/auth/tokens.py
 AUTH_COOKIE_ACCESS = 'access_token'
 AUTH_COOKIE_REFRESH = 'refresh_token'
-AUTH_COOKIE_SECURE = False     # set True once you're serving over HTTPS
+AUTH_COOKIE_SECURE = config('AUTH_COOKIE_SECURE',default=False,cast=bool)
 AUTH_COOKIE_SAMESITE = 'Lax'

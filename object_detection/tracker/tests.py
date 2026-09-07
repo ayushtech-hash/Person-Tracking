@@ -33,6 +33,101 @@ class AuthenticationRoutingTests(TestCase):
 
 
 class PersonSimilarityIndexTests(TestCase):
+    def test_selected_group_merge_uses_segments_when_raw_id_is_shared(self):
+        """Two groups can merge even when both segments have raw ID 21."""
+        report = TrackingReport.objects.create(output_video="/media/videos/v1/out.mp4")
+        first_group = PersonIdentityGroup.objects.create(
+            report=report, group_key=1, representative_track_id=21,
+        )
+        second_group = PersonIdentityGroup.objects.create(
+            report=report, group_key=2, representative_track_id=21,
+        )
+        # One raw stats row deliberately represents both segments.
+        PersonTrackStats.objects.create(
+            report=report, track_id=21, first_seen=0, last_seen=2,
+            visible_duration=2, frames_seen=2, identity_group=first_group,
+        )
+        first_segment = TrackSegment.objects.create(
+            report=report, raw_track_id=21, segment_number=1,
+            first_frame=10, last_frame=10, first_seen=0.4, last_seen=0.4,
+            frames_seen=1, is_active=False, identity_group=first_group,
+        )
+        second_segment = TrackSegment.objects.create(
+            report=report, raw_track_id=21, segment_number=2,
+            first_frame=40, last_frame=40, first_seen=1.6, last_seen=1.6,
+            frames_seen=1, is_active=False, identity_group=second_group,
+        )
+
+        response = self.client.post(
+            reverse("merge_selected_identity_groups"),
+            {
+                "report_id": report.id,
+                "identity_group_ids": json.dumps([1, 2]),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        second_segment.refresh_from_db()
+        self.assertEqual(second_segment.identity_group_id, first_group.id)
+        merge = ManualIdentityGroupMerge.objects.get(report=report)
+        self.assertEqual(json.loads(merge.moved_segment_ids), [second_segment.id])
+        self.assertEqual(json.loads(merge.moved_track_ids), [])
+
+    def test_manual_suggestion_merge_moves_only_the_suggested_segment_group(self):
+        """Confirming Track 5 with Track 6/Segment 2 must preserve 6/1."""
+        report = TrackingReport.objects.create(output_video="/media/videos/v1/out.mp4")
+        track_five_group = PersonIdentityGroup.objects.create(
+            report=report, group_key=1, representative_track_id=5,
+        )
+        segment_six_two_group = PersonIdentityGroup.objects.create(
+            report=report, group_key=2, representative_track_id=6,
+        )
+        unrelated_six_one_group = PersonIdentityGroup.objects.create(
+            report=report, group_key=3, representative_track_id=6,
+        )
+        track_six = PersonTrackStats.objects.create(
+            report=report, track_id=6, first_seen=0, last_seen=3,
+            visible_duration=3, frames_seen=2,
+        )
+        five_segment = TrackSegment.objects.create(
+            report=report, raw_track_id=5, segment_number=1,
+            first_frame=10, last_frame=10, first_seen=0.4, last_seen=0.4,
+            frames_seen=1, is_active=False, identity_group=track_five_group,
+        )
+        six_one = TrackSegment.objects.create(
+            report=report, raw_track_id=6, segment_number=1,
+            first_frame=20, last_frame=20, first_seen=0.8, last_seen=0.8,
+            frames_seen=1, is_active=False, identity_group=unrelated_six_one_group,
+        )
+        six_two = TrackSegment.objects.create(
+            report=report, raw_track_id=6, segment_number=2,
+            first_frame=50, last_frame=50, first_seen=2.0, last_seen=2.0,
+            frames_seen=1, is_active=False, identity_group=segment_six_two_group,
+        )
+        suggestion = ManualGroupingSuggestion.objects.create(
+            report=report,
+            first_group=track_five_group,
+            second_group=segment_six_two_group,
+            first_segment=five_segment,
+            second_segment=six_two,
+            first_track_id=5,
+            first_frame_number=10,
+            second_track_id=6,
+            second_frame_number=50,
+            similarity=0.75,
+        )
+
+        response = self.client.post(
+            reverse("merge_manual_identity_groups"),
+            {"report_id": report.id, "suggestion_id": suggestion.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        six_two.refresh_from_db()
+        six_one.refresh_from_db()
+        self.assertEqual(six_two.identity_group_id, track_five_group.id)
+        self.assertEqual(six_one.identity_group_id, unrelated_six_one_group.id)
+
     def test_identity_group_video_uses_only_its_exact_track_segment(self):
         """A raw ID reused after a switch must not contaminate another group."""
         report = TrackingReport.objects.create(

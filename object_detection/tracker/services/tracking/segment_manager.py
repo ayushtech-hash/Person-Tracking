@@ -104,15 +104,16 @@ class TrackSegmentManager:
             last_seen=timestamp,
             frames_seen=0,
         )
-        print(
-            "==========================[ID SWITCH CONFIRMED]================ "
-            f"report={self.report.id} raw_id={raw_track_id} "
-            f"closed_segment={previous_segment.segment_number} "
-            f"new_segment={new_segment.segment_number} "
-            f"frame={frame_number} time={float(timestamp):.2f}s "
-            f"reason={reason}"
-            "==========================[ID SWITCH CONFIRMED]================ "
-        )
+
+        # print(
+        #     "==========================[ID SWITCH CONFIRMED]================ "
+        #     f"report={self.report.id} raw_id={raw_track_id} "
+        #     f"closed_segment={previous_segment.segment_number} "
+        #     f"new_segment={new_segment.segment_number} "
+        #     f"frame={frame_number} time={float(timestamp):.2f}s "
+        #     f"reason={reason}"
+        #     "==========================[ID SWITCH CONFIRMED]================ "
+        # )
         self._active_segments[raw_track_id] = new_segment
         return previous_segment, new_segment
 
@@ -175,6 +176,56 @@ class TrackSegmentManager:
             ]
         )
 
+    def print_segment_summary(self):
+        """
+        Print all segments grouped by their raw ByteTrack Track ID.
+        """
+        segments = (
+            TrackSegment.objects
+            .filter(report=self.report)
+            .order_by("raw_track_id", "segment_number")
+        )
+
+        print("\n")
+        print("=" * 55)
+        print("              TRACK SEGMENT SUMMARY")
+        print("=" * 55)
+
+        if not segments.exists():
+            print("No segments found.")
+            print("=" * 55)
+            return
+
+        current_track_id = None
+        segment_list = []
+
+        for segment in segments:
+            if current_track_id is None:
+                current_track_id = segment.raw_track_id
+
+            if segment.raw_track_id != current_track_id:
+                print(
+                    f"Track {current_track_id} → "
+                    + ", ".join(segment_list)
+                )
+
+                current_track_id = segment.raw_track_id
+                segment_list = []
+
+            segment_list.append(
+                f"Segment {segment.segment_number}"
+            )
+
+        # Print the final track
+        if segment_list:
+            print(
+                f"Track {current_track_id} → "
+                + ", ".join(segment_list)
+            )
+
+        print("=" * 55)
+        print()
+
     def close_all(self):
         """Mark this run's remaining active segments as complete."""
         active_segments = list(self._active_segments.values())
@@ -184,3 +235,4 @@ class TrackSegmentManager:
                 is_active=True,
             ).update(is_active=False)
         self._active_segments.clear()
+        self.print_segment_summary()

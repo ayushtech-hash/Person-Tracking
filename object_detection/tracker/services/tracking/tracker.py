@@ -3,7 +3,7 @@
 import numpy as np
 import supervision as sv
 
-from deep_sort_realtime.deepsort_tracker import DeepSort
+# from deep_sort_realtime.deepsort_tracker import DeepSort
 
 from tracker.services.tracking.schemas import (
     Detection,
@@ -44,24 +44,24 @@ class PersonTracker:
         # =========================================================
         # DEEP SORT
         # =========================================================
-        elif self.tracker_type == "deepsort":
+        # elif self.tracker_type == "deepsort":
 
-            # self.tracker = DeepSort(
-            #     max_age=int(round(fps * 4)),
-            #     n_init=4,
-            #     max_cosine_distance=0.2,
-            #     nn_budget=100,
-            #     max_iou_distance=0.4,
-            #     # embedder="torchreid",  
+        #     # self.tracker = DeepSort(
+        #     #     max_age=int(round(fps * 4)),
+        #     #     n_init=4,
+        #     #     max_cosine_distance=0.2,
+        #     #     nn_budget=100,
+        #     #     max_iou_distance=0.4,
+        #     #     # embedder="torchreid",  
                 
-            # )
-            self.tracker = DeepSort(
-                max_age=int(round(fps * 2)),
-                n_init=3,
-                max_cosine_distance=0.35,
-                nn_budget=100,
-                max_iou_distance=0.6,   
-            )
+        #     # )
+        #     self.tracker = DeepSort(
+        #         max_age=int(round(fps * 2)),
+        #         n_init=3,
+        #         max_cosine_distance=0.35,
+        #         nn_budget=100,
+        #         max_iou_distance=0.6,   
+        #     )
 
         else:
 

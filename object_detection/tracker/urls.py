@@ -1,6 +1,7 @@
 from django.urls import path
 from tracker import views
 from .api_views import RegisterAPIView, LoginAPIView, LogoutAPIView, RefreshAPIView, MeAPIView
+from django.conf import settings
 
 urlpatterns = [
     path("", views.upload_video, name="upload_video"),

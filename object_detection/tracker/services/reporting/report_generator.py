@@ -296,6 +296,32 @@ class ReportGenerator:
             group.group_key: group
             for group in tracking_report.identity_groups.all()
         }
+
+        def resolve_suggestion_segment(suggestion, prefix):
+            """Find the exact segment behind one OSNet snapshot."""
+            segment_id = suggestion.get(f"{prefix}_segment_id")
+            if segment_id is not None:
+                return TrackSegment.objects.filter(
+                    report=tracking_report,
+                    id=int(segment_id),
+                ).first()
+
+            track_id = suggestion.get(f"{prefix}_track_id")
+            frame_number = suggestion.get(f"{prefix}_frame")
+            if track_id is None or frame_number is None:
+                return None
+            frame_event = (
+                TrackFrameEvent.objects.filter(
+                    track__report=tracking_report,
+                    track__track_id=int(track_id),
+                    frame_number=int(frame_number),
+                    segment__isnull=False,
+                )
+                .select_related("segment")
+                .first()
+            )
+            return frame_event.segment if frame_event is not None else None
+
         for suggestion in manual_grouping_suggestions:
             first_group = persisted_groups_by_key.get(
                 suggestion.get("first_identity_group_id")
@@ -314,17 +340,22 @@ class ReportGenerator:
             else:
                 first_prefix, second_prefix = "first", "second"
 
+            first_segment = resolve_suggestion_segment(suggestion, first_prefix)
+            second_segment = resolve_suggestion_segment(suggestion, second_prefix)
+
             ManualGroupingSuggestion.objects.update_or_create(
                 report=tracking_report,
                 first_group=first_group,
                 second_group=second_group,
                 defaults={
                     "first_track_id": int(suggestion[f"{first_prefix}_track_id"]),
+                    "first_segment": first_segment,
                     "first_frame_number": int(suggestion[f"{first_prefix}_frame"]),
                     "first_image_url": suggestion.get(
                         f"{first_prefix}_image_url", ""
                     ),
                     "second_track_id": int(suggestion[f"{second_prefix}_track_id"]),
+                    "second_segment": second_segment,
                     "second_frame_number": int(suggestion[f"{second_prefix}_frame"]),
                     "second_image_url": suggestion.get(
                         f"{second_prefix}_image_url", ""

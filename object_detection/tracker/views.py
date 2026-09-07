@@ -856,9 +856,13 @@ def _serialize_manual_grouping_suggestions(report):
             "first_group__group_key",
             "second_group__group_key",
             "first_track_id",
+            "first_segment_id",
+            "first_segment__segment_number",
             "first_frame_number",
             "first_image_url",
             "second_track_id",
+            "second_segment_id",
+            "second_segment__segment_number",
             "second_frame_number",
             "second_image_url",
             "similarity",
@@ -908,20 +912,32 @@ def _serialize_identity_groups_for_video(report, identity_group_ids):
 
 def _serialize_representative_event(report, group):
     """Return the persisted snapshot needed to restore one UI thumbnail."""
-    event = (
-        TrackFrameEvent.objects.filter(
-            track__report=report,
-            track__track_id=group.representative_track_id,
-            thumbnail_url__gt="",
+    segment_events = TrackFrameEvent.objects.filter(
+        segment__report=report,
+        segment__identity_group=group,
+        thumbnail_url__gt="",
+    ).select_related("segment", "track").order_by("frame_number", "id")
+    event = segment_events.first()
+    if event is None and not report.track_segments.exists():
+        event = (
+            TrackFrameEvent.objects.filter(
+                track__report=report,
+                track__track_id=group.representative_track_id,
+                thumbnail_url__gt="",
+            )
+            .select_related("track")
+            .order_by("frame_number", "id")
+            .first()
         )
-        .order_by("frame_number", "id")
-        .first()
-    )
     if not event:
         return None
 
     return {
         "track_id": event.track.track_id,
+        "segment_id": event.segment_id,
+        "segment_number": (
+            event.segment.segment_number if event.segment_id else None
+        ),
         "report_id": report.id,
         "frame": event.frame_number,
         "time_sec": round(event.timestamp, 2),
@@ -1010,21 +1026,44 @@ def merge_manual_identity_groups(request):
             first_group = suggestion.first_group
             second_group = suggestion.second_group
 
-            # Group keys follow initial encounter order, so the lower key has
-            # the earliest representative and remains visible after merging.
-            primary_group, duplicate_group = sorted(
-                (first_group, second_group),
-                key=lambda group: group.group_key,
-            )
-
-            moved_track_ids = list(PersonTrackStats.objects.filter(
-                report_id=report_id,
-                identity_group=duplicate_group,
-            ).values_list("track_id", flat=True))
-            moved_segment_ids = list(TrackSegment.objects.filter(
-                report_id=report_id,
-                identity_group=duplicate_group,
-            ).values_list("id", flat=True))
+            segment_mode = suggestion.report.track_segments.exists()
+            if segment_mode:
+                group_segments = {
+                    group.id: list(TrackSegment.objects.filter(
+                        report_id=report_id,
+                        identity_group=group,
+                    ))
+                    for group in (first_group, second_group)
+                }
+                if not group_segments[first_group.id] or not group_segments[second_group.id]:
+                    return JsonResponse(
+                        {
+                            "success": False,
+                            "error": "One of these groups has no track segments.",
+                        },
+                        status=409,
+                    )
+                primary_group, duplicate_group = sorted(
+                    (first_group, second_group),
+                    key=lambda group: min(
+                        (segment.first_frame, segment.id)
+                        for segment in group_segments[group.id]
+                    ),
+                )
+                moved_track_ids = []
+                moved_segment_ids = [
+                    segment.id for segment in group_segments[duplicate_group.id]
+                ]
+            else:
+                primary_group, duplicate_group = sorted(
+                    (first_group, second_group),
+                    key=lambda group: group.group_key,
+                )
+                moved_track_ids = list(PersonTrackStats.objects.filter(
+                    report_id=report_id,
+                    identity_group=duplicate_group,
+                ).values_list("track_id", flat=True))
+                moved_segment_ids = []
             affected_suggestions = list(
                 ManualGroupingSuggestion.objects.filter(
                     report_id=report_id,
@@ -1045,13 +1084,15 @@ def merge_manual_identity_groups(request):
                 moved_segment_ids=json.dumps(moved_segment_ids),
                 resolved_suggestion_ids=json.dumps(affected_suggestions),
             )
-            PersonTrackStats.objects.filter(
-                report_id=report_id,
-                track_id__in=moved_track_ids,
-            ).update(identity_group=primary_group)
-            TrackSegment.objects.filter(
-                id__in=moved_segment_ids,
-            ).update(identity_group=primary_group)
+            if moved_track_ids:
+                PersonTrackStats.objects.filter(
+                    report_id=report_id,
+                    track_id__in=moved_track_ids,
+                ).update(identity_group=primary_group)
+            if moved_segment_ids:
+                TrackSegment.objects.filter(
+                    id__in=moved_segment_ids,
+                ).update(identity_group=primary_group)
 
             # Keep the original group for undo, but remove it from all active
             # behavior and from the representative-thumbnail list.
@@ -1083,6 +1124,9 @@ def merge_manual_identity_groups(request):
                     "manual_merge_id": merge_history.id,
                     "output_video": suggestion.report.output_video,
                     "report": serialized_report,
+                    "representative_event": _serialize_representative_event(
+                        suggestion.report, primary_group
+                    ),
                     "identity_groups": _serialize_identity_groups_for_video(
                         suggestion.report,
                         [primary_group.group_key],
@@ -1141,15 +1185,17 @@ def undo_manual_identity_group_merge(request):
                     status=409,
                 )
 
-            PersonTrackStats.objects.filter(
-                report_id=report_id,
-                track_id__in=moved_track_ids,
-                identity_group=primary_group,
-            ).update(identity_group=duplicate_group)
-            TrackSegment.objects.filter(
-                id__in=moved_segment_ids,
-                identity_group=primary_group,
-            ).update(identity_group=duplicate_group)
+            if moved_track_ids:
+                PersonTrackStats.objects.filter(
+                    report_id=report_id,
+                    track_id__in=moved_track_ids,
+                    identity_group=primary_group,
+                ).update(identity_group=duplicate_group)
+            if moved_segment_ids:
+                TrackSegment.objects.filter(
+                    id__in=moved_segment_ids,
+                    identity_group=primary_group,
+                ).update(identity_group=duplicate_group)
             duplicate_group.is_active = True
             duplicate_group.merged_into = None
             duplicate_group.save(update_fields=["is_active", "merged_into"])
@@ -1222,7 +1268,7 @@ def merge_selected_identity_groups(request):
                     group_key__in=identity_group_ids,
                     is_active=True,
                 )
-                .prefetch_related("tracks")
+                .prefetch_related("tracks", "segments")
             )
             found_group_ids = {group.group_key for group in groups}
             missing_group_ids = set(identity_group_ids) - found_group_ids
@@ -1238,35 +1284,65 @@ def merge_selected_identity_groups(request):
                     status=404,
                 )
 
-            group_track_ids = {
-                group.id: [
-                    track.track_id
-                    for track in group.tracks.all()
-                ]
+            # New reports are segment-first. A raw ByteTrack ID may be shared
+            # by two people after a switch, so it is unsafe to use
+            # PersonTrackStats as group membership in that case. Reports
+            # created before segment support retain the legacy track fallback.
+            segment_mode = report.track_segments.exists()
+            group_segment_ids = {
+                group.id: [segment.id for segment in group.segments.all()]
                 for group in groups
             }
+            group_track_ids = {
+                group.id: [track.track_id for track in group.tracks.all()]
+                for group in groups
+            }
+            group_memberships = (
+                group_segment_ids if segment_mode else group_track_ids
+            )
             groups = [
                 group for group in groups
-                if group_track_ids.get(group.id)
+                if group_memberships.get(group.id)
             ]
             if len(groups) < 2:
+                member_name = "segments" if segment_mode else "tracks"
                 return JsonResponse(
                     {
                         "success": False,
-                        "error": "At least two selected groups must contain tracks.",
+                        "error": (
+                            "At least two selected groups must contain "
+                            f"{member_name}."
+                        ),
                     },
                     status=400,
                 )
 
-            primary_group = min(
-                groups,
-                key=lambda group: min(group_track_ids[group.id]),
-            )
-            representative_track_id = min(
-                track_id
-                for track_ids in group_track_ids.values()
-                for track_id in track_ids
-            )
+            if segment_mode:
+                segments_by_group = {
+                    group.id: list(group.segments.all()) for group in groups
+                }
+                primary_group = min(
+                    groups,
+                    key=lambda group: min(
+                        (segment.first_frame, segment.id)
+                        for segment in segments_by_group[group.id]
+                    ),
+                )
+                representative_track_id = min(
+                    segment.raw_track_id
+                    for segments in segments_by_group.values()
+                    for segment in segments
+                )
+            else:
+                primary_group = min(
+                    groups,
+                    key=lambda group: min(group_track_ids[group.id]),
+                )
+                representative_track_id = min(
+                    track_id
+                    for track_ids in group_track_ids.values()
+                    for track_id in track_ids
+                )
             duplicate_groups = [
                 group for group in groups
                 if group.id != primary_group.id
@@ -1286,11 +1362,14 @@ def merge_selected_identity_groups(request):
 
             merge_history_ids = []
             for duplicate_group in duplicate_groups:
-                moved_track_ids = group_track_ids[duplicate_group.id]
-                moved_segment_ids = list(TrackSegment.objects.filter(
-                    report=report,
-                    identity_group=duplicate_group,
-                ).values_list("id", flat=True))
+                moved_track_ids = (
+                    [] if segment_mode else group_track_ids[duplicate_group.id]
+                )
+                moved_segment_ids = (
+                    group_segment_ids[duplicate_group.id]
+                    if segment_mode
+                    else []
+                )
                 merge_history = ManualIdentityGroupMerge.objects.create(
                     report=report,
                     source_suggestion=None,
@@ -1301,13 +1380,15 @@ def merge_selected_identity_groups(request):
                     resolved_suggestion_ids=json.dumps(affected_suggestions),
                 )
                 merge_history_ids.append(merge_history.id)
-                PersonTrackStats.objects.filter(
-                    report=report,
-                    track_id__in=moved_track_ids,
-                ).update(identity_group=primary_group)
-                TrackSegment.objects.filter(
-                    id__in=moved_segment_ids,
-                ).update(identity_group=primary_group)
+                if moved_track_ids:
+                    PersonTrackStats.objects.filter(
+                        report=report,
+                        track_id__in=moved_track_ids,
+                    ).update(identity_group=primary_group)
+                if moved_segment_ids:
+                    TrackSegment.objects.filter(
+                        id__in=moved_segment_ids,
+                    ).update(identity_group=primary_group)
                 duplicate_group.is_active = False
                 duplicate_group.merged_into = primary_group
                 duplicate_group.save(update_fields=["is_active", "merged_into"])

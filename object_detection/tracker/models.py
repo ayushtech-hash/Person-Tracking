@@ -162,6 +162,23 @@ class ManualGroupingSuggestion(models.Model):
         on_delete=models.CASCADE,
         related_name="manual_suggestions_as_second",
     )
+    # These identify the exact fragments under review when a raw ByteTrack ID
+    # has been split, e.g. Track 6 / Segment 2. They are nullable so old
+    # reports and migrations remain readable.
+    first_segment = models.ForeignKey(
+        TrackSegment,
+        on_delete=models.SET_NULL,
+        related_name="manual_suggestions_as_first",
+        null=True,
+        blank=True,
+    )
+    second_segment = models.ForeignKey(
+        TrackSegment,
+        on_delete=models.SET_NULL,
+        related_name="manual_suggestions_as_second",
+        null=True,
+        blank=True,
+    )
     first_track_id = models.IntegerField()
     first_frame_number = models.PositiveIntegerField()
     first_image_url = models.CharField(max_length=1000, blank=True)

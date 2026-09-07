@@ -112,7 +112,9 @@
                 '"]'
             );
             if (duplicateCard) {
-                displayedTrackIds.delete(duplicateCard.dataset.trackId);
+                displayedTrackIds.delete(
+                    duplicateCard.dataset.eventKey || duplicateCard.dataset.trackId
+                );
                 duplicateCard.remove();
             }
         });
@@ -120,10 +122,17 @@
         if (
             mergeData.representative_event &&
             primaryCard &&
-            primaryCard.dataset.trackId !== String(mergeData.representative_event.track_id)
+            (
+                primaryCard.dataset.segmentId !==
+                    String(mergeData.representative_event.segment_id || "") ||
+                primaryCard.dataset.trackId !==
+                    String(mergeData.representative_event.track_id)
+            )
         ) {
             const wasSelected = primaryCard.classList.contains("selected");
-            displayedTrackIds.delete(primaryCard.dataset.trackId);
+            displayedTrackIds.delete(
+                primaryCard.dataset.eventKey || primaryCard.dataset.trackId
+            );
             primaryCard.remove();
             renderNewTrackEvents([mergeData.representative_event]);
             primaryCard = document.querySelector(
@@ -809,12 +818,14 @@
                 {
                     imageUrl: suggestion.first_image_url,
                     trackId: suggestion.first_track_id,
+                    segmentNumber: suggestion.first_segment__segment_number,
                     frame: suggestion.first_frame_number,
                     groupKey: suggestion.first_group__group_key,
                 },
                 {
                     imageUrl: suggestion.second_image_url,
                     trackId: suggestion.second_track_id,
+                    segmentNumber: suggestion.second_segment__segment_number,
                     frame: suggestion.second_frame_number,
                     groupKey: suggestion.second_group__group_key,
                 },
@@ -824,13 +835,20 @@
                 image.src = candidate.imageUrl;
                 image.alt =
                     "Review candidate: track " + candidate.trackId +
+                    (candidate.segmentNumber
+                        ? " segment " + candidate.segmentNumber
+                        : "") +
                     " at frame " + candidate.frame;
                 image.loading = "lazy";
 
                 const caption = document.createElement("figcaption");
                 caption.textContent =
                     "Group " + candidate.groupKey + " · track " +
-                    candidate.trackId + " · frame " + candidate.frame;
+                    candidate.trackId +
+                    (candidate.segmentNumber
+                        ? " · segment " + candidate.segmentNumber
+                        : "") +
+                    " · frame " + candidate.frame;
                 figure.appendChild(image);
                 figure.appendChild(caption);
                 images.appendChild(figure);
